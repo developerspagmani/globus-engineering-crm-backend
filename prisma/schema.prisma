@@ -1,0 +1,556 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model LegacyCustomer {
+  id              Int       @id @default(autoincrement())
+  customer_name   String?   @db.VarChar(200)
+  street1         String?   @db.VarChar(250)
+  street2         String?   @db.VarChar(250)
+  city            String?   @db.VarChar(150)
+  state           String?   @db.VarChar(230)
+  state_code      String?   @db.VarChar(15)
+  area            String?   @db.VarChar(150)
+  pin_code        Int?
+  contact_person1 String?   @db.VarChar(200)
+  designation1    String?   @db.VarChar(200)
+  email_id1       String?   @db.VarChar(250)
+  phone_number1   String?   @db.VarChar(200)
+  contact_person2 String?   @db.VarChar(200)
+  designation2    String?   @db.VarChar(200)
+  email_id2       String?   @db.VarChar(200)
+  phone_number2   String?   @db.VarChar(200)
+  contact_person3 String?   @db.VarChar(200)
+  designation3    String?   @db.VarChar(200)
+  email_id3       String?   @db.VarChar(200)
+  phone_number3   String?   @db.VarChar(200)
+  land_line       Int?
+  gst             String?   @db.VarChar(50)
+  tin             String?   @db.VarChar(50)
+  cst             String?   @db.VarChar(50)
+  tc              Int?
+  vmc             Int?
+  hmc             Int?
+  payment_terms   String?   @db.VarChar(100)
+  customer_type   String?   @db.VarChar(100)
+  fax             String?   @db.VarChar(250)
+  email           String?   @db.VarChar(255)
+  phone           String?   @db.VarChar(50)
+  industry        String?   @db.VarChar(100)
+  status          String?   @default("active") @db.VarChar(50)
+  agent_id        String?   @db.VarChar(50)
+  company_id      String?   @db.VarChar(50)
+  app_created_at  DateTime? @default(now()) @db.Timestamp(0)
+  district        String?   @db.VarChar(100)
+
+  @@map("tbl_customer")
+}
+
+model LegacyEmployee {
+  id             Int       @id @default(autoincrement())
+  ename          String    @db.VarChar(255)
+  dob            DateTime? @db.Date
+  designation    String?   @db.VarChar(255)
+  street1        String?   @db.VarChar(255)
+  street2        String?   @db.VarChar(255)
+  city           String?   @db.VarChar(255)
+  state          String?   @db.VarChar(255)
+  country        String?   @db.VarChar(255)
+  phone_number   String?   @db.VarChar(25)
+  email          String?   @db.VarChar(50)
+  password       String?   @db.VarChar(250)
+  photo          String?   @db.VarChar(255)
+  branch_no      Int?
+  company_id     String?   @db.VarChar(50)
+  app_status     String?   @default("active") @db.VarChar(50)
+  salary         Float?
+  joining_date   DateTime? @db.Date
+  app_created_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("tbl_employee")
+}
+
+model LegacyInvoice {
+  id             Int       @id @default(autoincrement())
+  invoice_date   DateTime? @db.Date
+  inward_no      Int?
+  dc_no          String?   @db.VarChar(200)
+  dc_date        DateTime? @db.Date
+  po_no          String?   @db.VarChar(250)
+  po_date        DateTime? @db.Date
+  customer_id    Int?
+  total          String?   @db.VarChar(250)
+  discount       String?   @db.VarChar(250)
+  other_charges  Float?
+  gst1           String?   @db.VarChar(250)
+  gst2           String?   @db.VarChar(250)
+  igst           String?   @db.VarChar(250)
+  gst1_per       String?   @db.VarChar(250)
+  gst2_per       String?   @db.VarChar(250)
+  igst_per       String?   @db.VarChar(250)
+  state_det      String?   @db.VarChar(250)
+  grand_total    String?   @db.VarChar(250)
+  paid_amount    String?   @db.VarChar(250)
+  voucher_date   DateTime? @db.Date
+  cheque_no      String?   @db.VarChar(250)
+  status         String?   @default("BILLED") @db.VarChar(30)
+  invoice_no     Int?
+  delivery_no    Int?
+  bill_type      String?   @db.VarChar(50)
+  company_id     String?   @db.VarChar(50)
+  app_created_at DateTime? @default(now()) @db.Timestamp(0)
+  address        String?   @db.Text
+  customer_name  String?   @db.VarChar(255)
+  due_date       DateTime? @db.Date
+  items_json     String?   @db.Text
+  sub_total      Float?
+  tax_total      Float?
+  inward_id      String?   @db.VarChar(50)
+  notes          String?   @db.Text
+
+  @@map("tbl_invoice")
+}
+
+model Company {
+  id             String  @id @db.VarChar(50)
+  name           String  @db.VarChar(255)
+  slug           String  @db.VarChar(100)
+  plan           String  @db.VarChar(50)
+  active_modules String? @db.Text
+
+  @@map("app_companies")
+}
+
+model User {
+  id                 String  @id @db.VarChar(50)
+  name               String  @db.VarChar(255)
+  email              String  @unique(map: "email") @db.VarChar(255)
+  password           String  @db.VarChar(255)
+  role               String  @db.VarChar(50)
+  company_id         String? @db.VarChar(50)
+  permissions        String? @db.Text
+  module_permissions String? @db.Text
+
+  @@map("app_users")
+}
+
+model Lead {
+  id         String    @id @db.VarChar(50)
+  name       String    @db.VarChar(255)
+  email      String?   @db.VarChar(255)
+  phone      String?   @db.VarChar(50)
+  company    String?   @db.VarChar(255)
+  industry   String?   @db.VarChar(100)
+  source     String?   @db.VarChar(100)
+  status     String?   @db.VarChar(50)
+  agent_id   String?   @db.VarChar(50)
+  company_id String?   @db.VarChar(50)
+  notes      String?   @db.Text
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_leads")
+}
+
+model Deal {
+  id                    String    @id @db.VarChar(50)
+  title                 String    @db.VarChar(255)
+  lead_id               String?   @db.VarChar(50)
+  agent_id              String?   @db.VarChar(50)
+  company_id            String?   @db.VarChar(50)
+  value                 Float?
+  status                String?   @db.VarChar(50)
+  priority              String?   @db.VarChar(50)
+  expected_closing_date DateTime? @db.Date
+  notes                 String?   @db.Text
+  created_at            DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_deals")
+}
+
+model Vendor {
+  id              String    @id @db.VarChar(50)
+  name            String    @db.VarChar(255)
+  email_          String?   @map("email?") @db.VarChar(255)
+  phone           String?   @db.VarChar(50)
+  company         String?   @db.VarChar(255)
+  category        String?   @db.VarChar(100)
+  company_id      String?   @db.VarChar(50)
+  status          String?   @db.VarChar(50)
+  created_at      DateTime? @default(now()) @db.Timestamp(0)
+  area            String?   @db.VarChar(100)
+  city            String?   @db.VarChar(100)
+  contact_person1 String?   @db.VarChar(200)
+  contact_person2 String?   @db.VarChar(200)
+  contact_person3 String?   @db.VarChar(200)
+  cst             String?   @db.VarChar(50)
+  designation1    String?   @db.VarChar(200)
+  designation2    String?   @db.VarChar(200)
+  designation3    String?   @db.VarChar(200)
+  email_id1       String?   @db.VarChar(250)
+  email_id2       String?   @db.VarChar(250)
+  email_id3       String?   @db.VarChar(250)
+  fax             String?   @db.VarChar(50)
+  gst             String?   @db.VarChar(50)
+  landline        String?   @db.VarChar(50)
+  phone_number1   String?   @db.VarChar(50)
+  phone_number2   String?   @db.VarChar(50)
+  phone_number3   String?   @db.VarChar(50)
+  pin_code        String?   @db.VarChar(20)
+  state           String?   @db.VarChar(100)
+  state_code      String?   @db.VarChar(10)
+  street1         String?   @db.VarChar(255)
+  street2         String?   @db.VarChar(255)
+  tin             String?   @db.VarChar(50)
+  vendor_id       String?   @db.VarChar(50)
+  vendor_name     String?   @db.VarChar(255)
+  vendor_type     String?   @db.VarChar(50)
+
+  @@map("app_vendors")
+}
+
+model InwardEntry {
+  id            String    @id @db.VarChar(50)
+  inward_no     String    @db.VarChar(50)
+  customer_id   String?   @db.VarChar(50)
+  customer_name String?   @db.VarChar(255)
+  address       String?   @db.Text
+  vendor_id     String?   @db.VarChar(50)
+  vendor_name   String?   @db.VarChar(255)
+  po_reference  String?   @db.VarChar(100)
+  challan_no    String?   @db.VarChar(100)
+  dc_no         String?   @db.VarChar(100)
+  dc_date       DateTime? @db.Date
+  vehicle_no    String?   @db.VarChar(50)
+  company_id    String?   @db.VarChar(50)
+  date          DateTime? @db.Date
+  status        String?   @db.VarChar(50)
+  items_json    String?   @db.Text
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  po_date       DateTime? @db.Date
+
+  @@map("app_inward_entries")
+}
+
+model OutwardEntry {
+  id                String    @id @db.VarChar(50)
+  outward_no        String    @db.VarChar(50)
+  customer_id       String?   @db.VarChar(50)
+  customer_name     String?   @db.VarChar(255)
+  invoice_reference String?   @db.VarChar(100)
+  challan_no        String?   @db.VarChar(100)
+  vehicle_no        String?   @db.VarChar(50)
+  company_id        String?   @db.VarChar(50)
+  date              DateTime? @db.Date
+  status            String?   @db.VarChar(50)
+  items_json        String?   @db.Text
+  created_at        DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_outward_entries")
+}
+
+model LedgerEntry {
+  id           String    @id @db.VarChar(50)
+  party_id     String    @db.VarChar(50)
+  party_name   String    @db.VarChar(255)
+  party_type   String    @db.VarChar(50)
+  company_id   String?   @db.VarChar(50)
+  date         DateTime? @db.Date
+  type         String    @db.VarChar(20)
+  amount       Float
+  balance      Float
+  description  String?   @db.Text
+  reference_id String?   @db.VarChar(100)
+  created_at   DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_ledger_entries")
+}
+
+model Challan {
+  id          String    @id @db.VarChar(50)
+  challan_no  String    @db.VarChar(50)
+  party_id    String?   @db.VarChar(50)
+  party_name  String?   @db.VarChar(255)
+  party_type  String?   @db.VarChar(50)
+  company_id  String?   @db.VarChar(50)
+  date        DateTime? @db.Date
+  type        String?   @db.VarChar(50)
+  status      String?   @db.VarChar(50)
+  items_json  String?   @db.Text
+  vehicle_no  String?   @db.VarChar(50)
+  driver_name String?   @db.VarChar(255)
+  created_at  DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_challans")
+}
+
+model Voucher {
+  id           String    @id @db.VarChar(50)
+  voucher_no   String    @db.VarChar(50)
+  date         DateTime? @db.Date
+  type         String?   @db.VarChar(50)
+  party_id     String?   @db.VarChar(50)
+  party_name   String?   @db.VarChar(255)
+  party_type   String?   @db.VarChar(50)
+  company_id   String?   @db.VarChar(50)
+  amount       Float?
+  payment_mode String?   @db.VarChar(50)
+  cheque_no    String?   @db.VarChar(50)
+  reference_no String?   @db.VarChar(100)
+  description_ String?   @map("description?") @db.Text
+  status       String?   @db.VarChar(50)
+  created_at   DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_vouchers")
+}
+
+model Item {
+  id         String    @id @db.VarChar(50)
+  item_code  String    @db.VarChar(100)
+  item_name  String    @db.VarChar(255)
+  company_id String?   @db.VarChar(50)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_items")
+}
+
+model Process {
+  id           String    @id @db.VarChar(50)
+  process_name String    @db.VarChar(255)
+  company_id   String?   @db.VarChar(50)
+  created_at   DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_processes")
+}
+
+model PriceFixing {
+  id            String    @id @db.VarChar(50)
+  customer_id   String    @db.VarChar(50)
+  customer_name String    @db.VarChar(255)
+  item_id       String    @db.VarChar(50)
+  item_name     String    @db.VarChar(255)
+  process_id    String    @db.VarChar(50)
+  process_name  String    @db.VarChar(255)
+  price         Float
+  company_id    String?   @db.VarChar(50)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("app_price_fixings")
+}
+
+model banner {
+  banner_id         Int     @id @default(autoincrement())
+  banner_background String? @db.VarChar(250)
+  image1            String? @db.VarChar(250)
+  image2            String? @db.VarChar(250)
+}
+
+model daily_plan {
+  daily_plan               Int     @id @default(autoincrement())
+  country_id               Int?
+  island_id                Int?
+  per_day_amount           Float?
+  image                    String? @db.VarChar(255)
+  popular_dive_destination String? @default("No") @db.VarChar(100)
+}
+
+model dive_center {
+  dive_center_id      Int     @id @default(autoincrement())
+  center_name         String? @db.VarChar(250)
+  address1            String? @db.VarChar(250)
+  address2            String? @db.VarChar(250)
+  city                String? @db.VarChar(50)
+  state               String? @db.VarChar(75)
+  country_id          Int?
+  island_id           Int?
+  contact_person_name String? @db.VarChar(250)
+  contact_no          BigInt?
+  email_id            String? @db.VarChar(250)
+  center_image        String? @db.VarChar(250)
+}
+
+model employee {
+  id     Int     @id @default(autoincrement())
+  name   String? @db.VarChar(50)
+  gender String? @db.Char(20)
+  photo  String? @db.Text
+}
+
+model product {
+  product_id          Int     @id @default(autoincrement())
+  product_name        String? @db.VarChar(60)
+  product_image       String? @db.VarChar(250)
+  price               Float?
+  product_description String? @db.Text
+}
+
+model special_offer {
+  special_offer_id     Int     @id @default(autoincrement())
+  offer_image          String? @db.VarChar(250)
+  offer_period         String? @db.VarChar(20)
+  price                Float?
+  starting_place_id    Int?
+  destination_place_id Int?
+  start_km             String? @db.VarChar(50)
+  note                 String? @db.Text
+  dive_center_id       Int?
+}
+
+model tbl_country {
+  country_id   Int     @id @default(autoincrement())
+  country_name String? @db.VarChar(150)
+}
+
+model tbl_courses {
+  id          Int     @id @default(autoincrement())
+  description String? @db.Text
+}
+
+model tbl_fundive {
+  id          Int     @id @default(autoincrement())
+  description String? @db.Text
+}
+
+model tbl_generalinfo {
+  id          Int     @id @default(autoincrement())
+  description String? @db.Text
+}
+
+model tbl_help {
+  id          Int     @id @default(autoincrement())
+  description String? @db.Text
+}
+
+model tbl_invoice_item {
+  id             Int     @id @default(autoincrement())
+  invoice_no     Int?
+  item_id        Int?
+  process_id     Int?
+  qty            Int?    @default(0)
+  wop_qty        Int?    @default(0)
+  price          Float?
+  item_total     Float?
+  status         String? @default("BILLED") @db.VarChar(50)
+  inward_item_no Int?
+  bill_type      String? @db.VarChar(50)
+}
+
+model tbl_inward {
+  id          Int       @id @default(autoincrement())
+  inward_date DateTime? @db.Date
+  dc_no       String?   @db.VarChar(250)
+  dc_date     DateTime? @db.Date
+  po_no       String?   @db.VarChar(250)
+  po_date     DateTime? @db.Date
+  customer_id Int?
+}
+
+model tbl_inward_item {
+  id            Int     @id @default(autoincrement())
+  inward_no     Int?
+  item_id       Int?
+  process_id    Int?
+  qty           Int?    @default(0)
+  delivered_qty Int?    @default(0)
+  status        String? @default("OPEN") @db.VarChar(50)
+}
+
+model tbl_island {
+  island_id   Int     @id @default(autoincrement())
+  country_id  Int?
+  island_name String? @db.VarChar(150)
+}
+
+model tbl_item {
+  id        Int     @id @default(autoincrement())
+  item      String? @db.Text
+  item_code String? @db.VarChar(200)
+}
+
+model tbl_item_1 {
+  id        Int     @id @default(autoincrement())
+  item      String? @db.VarChar(250)
+  item_code String? @db.VarChar(100)
+}
+
+model tbl_item_price_fixing {
+  id          Int    @id @default(autoincrement())
+  item_id     Int?
+  process_id  Int?
+  price       Float?
+  customer_id Int?
+}
+
+model tbl_map {
+  id  Int    @id @default(autoincrement())
+  lat Float? @db.Float
+  lng Float? @db.Float
+}
+
+model tbl_package {
+  id          Int     @id @default(autoincrement())
+  description String? @db.Text
+}
+
+model tbl_process {
+  id      Int     @id @default(autoincrement())
+  process String? @db.VarChar(200)
+}
+
+model tbl_social_links {
+  id           Int     @id @default(autoincrement())
+  name         String? @db.VarChar(100)
+  fa_icon_name String? @db.VarChar(100)
+  links        String? @db.Text
+}
+
+model tbl_vendor {
+  id              Int     @id @default(autoincrement())
+  customer_name   String? @db.VarChar(200)
+  street1         String? @db.VarChar(250)
+  street2         String? @db.VarChar(250)
+  city            String? @db.VarChar(150)
+  state           String? @db.VarChar(230)
+  state_code      String? @db.VarChar(15)
+  area            String? @db.VarChar(150)
+  pin_code        Int?
+  contact_person1 String? @db.VarChar(200)
+  designation1    String? @db.VarChar(200)
+  email_id1       String? @db.VarChar(250)
+  phone_number1   String? @db.VarChar(200)
+  contact_person2 String? @db.VarChar(200)
+  designation2    String? @db.VarChar(200)
+  email_id2       String? @db.VarChar(200)
+  phone_number2   String? @db.VarChar(200)
+  contact_person3 String? @db.VarChar(200)
+  designation3    String? @db.VarChar(200)
+  email_id3       String? @db.VarChar(200)
+  phone_number3   String? @db.VarChar(200)
+  land_line       Int?
+  gst             String? @db.VarChar(50)
+  tin             String? @db.VarChar(50)
+  cst             String? @db.VarChar(50)
+  tc              Int?
+  vmc             Int?
+  hmc             Int?
+  payment_terms   String? @db.VarChar(100)
+  customer_type   String? @db.VarChar(100)
+  fax             String? @db.VarChar(250)
+}
+
+model user {
+  user_id     BigInt    @id @default(autoincrement())
+  password    String?   @db.VarChar(255)
+  user_type   String?   @db.VarChar(255)
+  email       String?   @db.VarChar(255)
+  logged_in   String?   @db.VarChar(255)
+  last_login  DateTime? @db.DateTime(0)
+  first_name  String?   @db.VarChar(255)
+  middle_name String?   @db.VarChar(255)
+  last_name   String?   @db.VarChar(255)
+  emp_no      Int?
+}
