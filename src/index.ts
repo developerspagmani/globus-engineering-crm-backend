@@ -21,16 +21,13 @@ app.use('/api', apiRoutes);
 // Swagger Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// Start Server
-app.listen(PORT, async () => {
-  console.log(`🚀 MVC Backend running on http://localhost:${PORT}`);
-  console.log('DEBUG: SERVER RESTARTED - LOADED VERSION 2');
-  try {
-    await prisma.$connect();
-    console.log('✅ Connected to Database via Prisma');
-  } catch (err) {
-    console.error('❌ Database connection failed:', err);
-  }
-});
+// Initial Database connection test removed from server start for serverless compatibility.
+// Serverless functions start up quickly; Prisma handles connections on the first query.
+
+if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
+  app.listen(PORT, () => {
+    console.log(`🚀 MVC Backend running on http://localhost:${PORT}`);
+  });
+}
 
 export default app;
