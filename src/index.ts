@@ -15,6 +15,18 @@ const PORT = process.env.PORT || 4000;
 app.use(cors());
 app.use(express.json());
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'Globus Engineering CRM Backend API',
+    version: '1.0.0',
+    endpoints: {
+      api: '/api',
+      docs: '/api-docs'
+    }
+  });
+});
+
 // Main API Routes
 app.use('/api', apiRoutes);
 
