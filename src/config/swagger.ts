@@ -17,8 +17,8 @@ const options: swaggerJsdoc.Options = {
         description: 'Development server (Localhost)',
       },
       {
-        url: 'http://127.0.0.1:4000',
-        description: 'Development server (IP)',
+        url: 'https://globus-engineering-crm-backend.vercel.app',
+        description: 'Production server (Vercel)',
       },
     ],
     components: {
