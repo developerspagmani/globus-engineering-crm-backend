@@ -208,7 +208,7 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
 
   try {
     const customers = await prisma.legacyCustomer.findMany({
-      where: companyId ? {
+      where: companyId ? { 
         OR: [
           { company_id: String(companyId) },
           { company_id: null },
@@ -264,6 +264,7 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
   }
 };
 
+
 export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
   const partyId = req.query.partyId as string;
@@ -300,7 +301,7 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
 
   try {
     const challans = await prisma.challan.findMany({
-      where: companyId ? {
+      where: companyId ? { 
         OR: [
           { company_id: String(companyId) },
           { company_id: String(companyId).toLowerCase() }
@@ -322,7 +323,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 
   try {
     const vouchers = await prisma.voucher.findMany({
-      where: companyId ? {
+      where: companyId ? { 
         OR: [
           { company_id: String(companyId) },
           { company_id: String(companyId).toLowerCase() }
@@ -560,10 +561,10 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
       if (type === 'receipt' && party_type === 'customer' && reference_no) {
         // Find invoices by number (reference_no is comma separated)
         const invNumbers = reference_no.split(',').map((s: string) => s.trim()).filter(Boolean);
-
+        
         if (invNumbers.length > 0) {
           console.log(`[VOUCHER SYNC] Attempting to find invoices: ${invNumbers.join(', ')} for company: ${finalCompanyId}`);
-
+          
           // Smart Identification: Match both raw numbers and formatted strings (like 'INV-1')
           const invNumsAsInts = invNumbers.map((n: string) => {
             const onlyDigits = n.replace(/\D/g, ''); // Extract just digits from 'INV-1' -> '1'
@@ -589,16 +590,16 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           let remainingAmount = finalAmount;
           for (const inv of invoices) {
             if (remainingAmount <= 0) break;
-
+            
             const currentGrandTotal = parseFloat(inv.grand_total || '0');
             const currentPaidAmount = parseFloat(inv.paid_amount || '0');
             const balanceDue = currentGrandTotal - currentPaidAmount;
-
+            
             if (balanceDue <= 0) continue; // Already paid
 
             const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
             const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
-
+            
             console.log(`[VOUCHER SYNC] Updating Invoice #${inv.invoice_no}: Adding ₹${paymentForThisInvoice}. New Paid Amount: ₹${newPaidAmount}`);
 
             await (tx as any).legacyInvoice.update({
@@ -608,7 +609,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
                 status: newPaidAmount >= currentGrandTotal ? 'PAID' : 'BILLED'
               }
             });
-
+            
             remainingAmount -= paymentForThisInvoice;
           }
         }
@@ -624,7 +625,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         });
 
         const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-
+        
         // Receipts REDUCE the balance (Credit)
         // Payments (if you were paying a vendor) would INCREASE the balance (if tracking payable)
         const newBalance = type === 'receipt' ? lastBalance - finalAmount : lastBalance + finalAmount;
@@ -950,9 +951,9 @@ export const getGstDetails = async (req: AuthRequest, res: Response) => {
 
   try {
     const formattedGstin = String(gstin).toUpperCase();
-
+    
     // Authenticated Bridge to Masters India Live Portal Registry
-    const uniqueId = 'K3nUOh0Sn0ZpqtfxbBcWY2M6GBnRat';
+    const uniqueId = 'K3nUOh0Sn0ZpqtfxbBcWY2M6GBnRat'; 
     const url = `https://blog-backend.mastersindia.co/api/v1/custom/search/gstin/?keyword=${formattedGstin}&unique_id=${uniqueId}`;
 
     console.log(`[GST-LIVE-FETCH] Querying National Registry for: ${formattedGstin}`);

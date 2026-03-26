@@ -9,7 +9,7 @@ import swaggerSpec from './config/swagger';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(cors({
@@ -21,7 +21,7 @@ app.use(express.json());
 
 // Root route
 app.get('/', (req, res) => {
-  res.json({
+  res.json({ 
     message: 'Globus Engineering CRM Backend API',
     version: '1.0.0',
     endpoints: {

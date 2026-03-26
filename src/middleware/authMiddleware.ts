@@ -30,15 +30,10 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
 
   const authHeader = req.headers.authorization;
   console.log('--- AUTHENTICATION CHECK ---');
-  console.log(`Endpoint: ${req.method} ${req.originalUrl}`);
   console.log('Auth Header:', authHeader ? 'Present' : 'MISSING');
 
-  if (!authHeader) {
-    console.log('[DEBUG] Full Headers:', JSON.stringify(req.headers, null, 2));
-  }
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.warn(`Auth Failure: No Bearer token provided for ${req.originalUrl}`);
+    console.warn('Auth Failure: No Bearer token provided');
     return res.status(401).json({ error: 'Access denied. No token provided.' });
   }
 
