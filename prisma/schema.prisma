@@ -122,6 +122,9 @@ model Company {
   slug           String  @db.VarChar(100)
   plan           String  @db.VarChar(50)
   active_modules String? @db.Text
+  users          User[]
+  leads          Lead[]
+  deals          Deal[]
 
   @@map("app_companies")
 }
@@ -135,6 +138,7 @@ model User {
   company_id         String? @db.VarChar(50)
   permissions        String? @db.Text
   module_permissions String? @db.Text
+  company            Company? @relation(fields: [company_id], references: [id])
 
   @@map("app_users")
 }
@@ -152,6 +156,7 @@ model Lead {
   company_id String?   @db.VarChar(50)
   notes      String?   @db.Text
   created_at DateTime? @default(now()) @db.Timestamp(0)
+  company_rel Company? @relation(fields: [company_id], references: [id])
 
   @@map("app_leads")
 }
@@ -168,6 +173,7 @@ model Deal {
   expected_closing_date DateTime? @db.Date
   notes                 String?   @db.Text
   created_at            DateTime? @default(now()) @db.Timestamp(0)
+  company_rel           Company? @relation(fields: [company_id], references: [id])
 
   @@map("app_deals")
 }
@@ -542,7 +548,7 @@ model tbl_vendor {
   fax             String? @db.VarChar(250)
 }
 
-model user {
+model LegacyUser {
   user_id     BigInt    @id @default(autoincrement())
   password    String?   @db.VarChar(255)
   user_type   String?   @db.VarChar(255)
@@ -553,4 +559,6 @@ model user {
   middle_name String?   @db.VarChar(255)
   last_name   String?   @db.VarChar(255)
   emp_no      Int?
+
+  @@map("user")
 }

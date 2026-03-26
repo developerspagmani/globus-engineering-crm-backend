@@ -29,8 +29,8 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   }
 
   const authHeader = req.headers.authorization;
-  console.log('--- AUTHENTICATION CHECK ---');
-  console.log('Auth Header:', authHeader ? 'Present' : 'MISSING');
+  // console.log('--- AUTHENTICATION CHECK ---');
+  // console.log('Auth Header:', authHeader ? 'Present' : 'MISSING');
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     console.warn('Auth Failure: No Bearer token provided');
@@ -41,9 +41,9 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
-    console.log('--- AUTHENTICATE MIDDLEWARE ATTACHING USER ---');
-    console.log('Decoded Token Keys:', Object.keys(decoded));
-    console.log('User ID:', decoded.id, 'Email:', decoded.email, 'CompID:', decoded.company_id || decoded.companyId);
+    // console.log('--- AUTHENTICATE MIDDLEWARE ATTACHING USER ---');
+    // console.log('Decoded Token Keys:', Object.keys(decoded));
+    // console.log('User ID:', decoded.id, 'Email:', decoded.email, 'CompID:', decoded.company_id || decoded.companyId);
     req.user = decoded;
     next();
   } catch (error: any) {

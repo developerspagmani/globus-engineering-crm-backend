@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import prisma from '../config/prisma';
+import prisma from '../../config/prisma';
 import crypto from 'crypto';
 
 export const getAllCompanies = async (req: Request, res: Response) => {

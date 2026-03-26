@@ -1,0 +1,224 @@
+import { Response } from 'express';
+import prisma from '../../config/prisma';
+import { AuthRequest } from '../../middleware/authMiddleware';
+
+export const getAllInvoices = async (req: AuthRequest, res: Response) => {
+  const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
+  const user = req.user;
+
+  // 1. Determine CompanyID - Support User context AND Direct Query Param (Snake and Camel)
+  const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
+
+  try {
+    const invoices = await (prisma as any).legacyInvoice.findMany({
+      where: companyId ? { company_id: String(companyId) } : {},
+      orderBy: { invoice_date: 'desc' }
+    });
+
+    const parsedInvoices = invoices.map((inv: any) => {
+      const base = { ...inv };
+      const mapped = {
+        ...base,
+        id: inv.id.toString(),
+        invoiceNumber: inv.invoice_no?.toString() || inv.id.toString(),
+        date: inv.invoice_date,
+        dueDate: inv.due_date,
+        customerId: inv.customer_id?.toString(),
+        customerName: inv.customer_name || inv.customer?.customer_name || 'N/A',
+        poNo: inv.po_no || '',
+        poDate: inv.po_date,
+        dcNo: inv.dc_no || '',
+        dcDate: inv.dc_date,
+        billType: inv.bill_type === 'with_process' ? 'With Process' :
+          inv.bill_type === 'without_process' ? 'Without Process' :
+            inv.bill_type === 'both' ? 'Both' : (inv.bill_type || 'With Process'),
+        type: (inv.bill_type === 'with_process' ? 'INVOICE' :
+          inv.bill_type === 'without_process' ? 'WOP' :
+            inv.bill_type === 'both' ? 'BOTH' : 'INVOICE'),
+        items: JSON.parse(inv.items_json || '[]'),
+        subTotal: parseFloat(inv.total || '0'),
+        grandTotal: parseFloat(inv.grand_total || '0'),
+        discount: parseFloat(inv.discount || '0'),
+        status: inv.status || 'DRAFT'
+      };
+      return mapped;
+    });
+
+    res.json(parsedInvoices);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch invoices', detail: error.message });
+  }
+};
+
+export const createInvoice = async (req: AuthRequest, res: Response) => {
+  const {
+    invoiceNumber, date, dueDate, customerId, customerName,
+    address, subTotal, grandTotal, items, billType, inwardId, company_id, companyId, notes,
+    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate
+  } = req.body;
+  const user = req.user;
+  const finalCompanyId = user?.company_id || company_id || companyId;
+
+  try {
+    const invNo = invoiceNumber ? parseInt(String(invoiceNumber).replace(/\D/g, '')) : null;
+    const delNo = req.body.challanNumber ? parseInt(String(req.body.challanNumber).replace(/\D/g, '')) : null;
+
+    if (invNo) {
+      const existingInv = await (prisma as any).legacyInvoice.findFirst({
+        where: { invoice_no: invNo, company_id: String(finalCompanyId || '').toLowerCase() }
+      });
+      if (existingInv) return res.status(400).json({ error: `Invoice Number ${invNo} already exists!` });
+    }
+
+    if (delNo) {
+      const existingDel = await (prisma as any).legacyInvoice.findFirst({
+        where: { delivery_no: delNo, company_id: String(finalCompanyId || '').toLowerCase() }
+      });
+      if (existingDel) return res.status(400).json({ error: `Delivery Challan Number ${delNo} already exists!` });
+    }
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const newInvoice = await (tx as any).legacyInvoice.create({
+        data: {
+          invoice_no: invNo,
+          delivery_no: delNo,
+          invoice_date: date ? new Date(date) : new Date(),
+          due_date: dueDate ? new Date(dueDate) : null,
+          customer_id: customerId ? parseInt(String(customerId)) : null,
+          customer_name: customerName,
+          address,
+          total: String(subTotal || '0'),
+          grand_total: String(grandTotal || '0'),
+          items_json: JSON.stringify(items || []),
+          bill_type: billType === 'With Process' ? 'with_process' :
+            billType === 'Without Process' ? 'without_process' :
+              billType === 'Both' ? 'both' : 'with_process',
+          inward_no: invNo,
+          po_no: String(po_no || poNo || '').trim() || null,
+          po_date: (po_date || poDate) ? new Date(po_date || poDate) : null,
+          dc_no: String(dc_no || dcNo || '').trim() || null,
+          dc_date: (dc_date || dcDate) ? new Date(dc_date || dcDate) : null,
+          inward_id: inwardId ? String(inwardId) : null,
+          company_id: String(finalCompanyId || '').toLowerCase(),
+          status: 'BILLED',
+          notes: notes || ''
+        }
+      });
+
+      if (inwardId) {
+        await tx.inwardEntry.update({
+          where: { id: String(inwardId) },
+          data: { status: 'completed' }
+        });
+      }
+
+      const lastEntry = await tx.ledgerEntry.findFirst({
+        where: {
+          party_id: String(customerId),
+          company_id: finalCompanyId ? String(finalCompanyId) : undefined
+        },
+        orderBy: { created_at: 'desc' }
+      });
+
+      const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+      const amountAsFloat = parseFloat(grandTotal || '0');
+      const newBalance = lastBalance + amountAsFloat;
+
+      await tx.ledgerEntry.create({
+        data: {
+          id: crypto.randomUUID(),
+          party_id: String(customerId),
+          party_name: customerName,
+          party_type: 'customer',
+          company_id: finalCompanyId ? String(finalCompanyId) : null,
+          date: date ? new Date(date) : new Date(),
+          type: 'debit',
+          amount: amountAsFloat,
+          balance: newBalance,
+          description: `Invoice Generated: ${newInvoice.invoice_no}`,
+          reference_id: String(newInvoice.id)
+        } as any
+      });
+
+      return newInvoice;
+    });
+
+    res.status(201).json(invoice);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to create invoice', detail: error.message });
+  }
+};
+
+export const updateInvoice = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const {
+    date, dueDate, customerId, customerName,
+    address, subTotal, grandTotal, items, billType, inwardId, status, notes
+  } = req.body;
+
+  try {
+    const invoice = await (prisma as any).legacyInvoice.update({
+      where: { id: parseInt(String(id)) },
+      data: {
+        invoice_date: date ? new Date(date) : undefined,
+        due_date: dueDate ? new Date(dueDate) : undefined,
+        customer_id: customerId ? parseInt(String(customerId)) : undefined,
+        customer_name: customerName,
+        address,
+        total: subTotal ? String(subTotal) : undefined,
+        grand_total: grandTotal ? String(grandTotal) : undefined,
+        items_json: items ? JSON.stringify(items) : undefined,
+        bill_type: billType === 'With Process' ? 'with_process' :
+          billType === 'Without Process' ? 'without_process' :
+            billType === 'Both' ? 'both' : billType,
+        inward_id: inwardId ? String(inwardId) : undefined,
+        po_no: req.body.po_no || req.body.poNo,
+        po_date: (req.body.po_date || req.body.poDate) ? new Date(req.body.po_date || req.body.poDate) : undefined,
+        dc_no: req.body.dc_no || req.body.dcNo,
+        dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
+        status: status?.toUpperCase(),
+        notes: notes
+      }
+    });
+    res.json(invoice);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update invoice', detail: error.message });
+  }
+};
+
+export const deleteInvoice = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    await (prisma as any).legacyInvoice.delete({
+      where: { id: parseInt(String(id)) }
+    });
+    res.json({ message: 'Invoice deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete invoice', detail: error.message });
+  }
+};
+
+export const getNextNumbers = async (req: AuthRequest, res: Response) => {
+  const user = req.user;
+  const companyId = user?.company_id || (user as any)?.companyId;
+
+  if (!companyId) return res.status(400).json({ error: 'Company context required' });
+
+  try {
+    const lastInv = await (prisma as any).legacyInvoice.findFirst({
+      where: { company_id: String(companyId) },
+      orderBy: { invoice_no: 'desc' }
+    });
+    const lastDel = await (prisma as any).legacyInvoice.findFirst({
+      where: { company_id: String(companyId) },
+      orderBy: { delivery_no: 'desc' }
+    });
+
+    res.json({
+      nextInvoice: (lastInv?.invoice_no || 0) + 1,
+      nextChallan: (lastDel?.delivery_no || 0) + 1
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to get next numbers', detail: error.message });
+  }
+};
