@@ -72,6 +72,9 @@ router.post('/auth/register', authController.register);
  *         description: Current user data
  */
 router.get('/auth/me', authenticate as any, authController.getMe);
+ 
+ // Publicly accessible for Login dropdown
+ router.get('/companies', companyController.getAllCompanies);
 
 // Health check (Public)
 /**
@@ -136,15 +139,10 @@ router.put('/price-fixings/:id', masterController.updatePriceFixing);
 router.delete('/price-fixings/:id', masterController.deletePriceFixing);
 
 
-/**
- * @openapi
- * /api/companies:
- *   get: { summary: Retrieve all companies, tags: [Admin], responses: { 200: { description: List of companies } } }
- */
-router.get('/companies', authorize(['super_admin', 'admin', 'company_admin']) as any, companyController.getAllCompanies);
-router.post('/companies', authorize(['super_admin']) as any, companyController.createCompany);
-router.put('/companies/:id', authorize(['super_admin']) as any, companyController.updateCompany);
-router.delete('/companies/:id', authorize(['super_admin']) as any, companyController.deleteCompany);
+ // Admin Company Management (Protected)
+ router.post('/companies', authorize(['super_admin']) as any, companyController.createCompany);
+ router.put('/companies/:id', authorize(['super_admin']) as any, companyController.updateCompany);
+ router.delete('/companies/:id', authorize(['super_admin']) as any, companyController.deleteCompany);
 
 /**
  * @openapi
