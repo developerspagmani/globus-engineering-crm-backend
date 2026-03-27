@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
+import crypto from 'crypto';
 
 export const getAllDeals = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = req.query.companyId as string;
@@ -24,12 +25,12 @@ export const createDeal = async (req: AuthRequest, res: Response) => {
   try {
     const deal = await prisma.deal.create({
       data: {
-        id,
+        id: id || crypto.randomUUID(),
         title,
         lead_id,
         agent_id: user?.id,
         company_id: user?.company_id,
-        value: parseFloat(value),
+        value: value ? parseFloat(String(value)) : 0,
         status: status || 'open',
         priority: priority || 'medium',
         expected_closing_date: expected_closing_date ? new Date(expected_closing_date) : null,
@@ -41,6 +42,7 @@ export const createDeal = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to create deal', detail: error.message });
   }
 };
+
 
 export const updateDeal = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;

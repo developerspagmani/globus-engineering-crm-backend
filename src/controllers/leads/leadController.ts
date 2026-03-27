@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
+import crypto from 'crypto';
 
 export const getAllLeads = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = req.query.companyId as string;
@@ -24,7 +25,7 @@ export const createLead = async (req: AuthRequest, res: Response) => {
   try {
     const lead = await prisma.lead.create({
       data: {
-        id,
+        id: id || crypto.randomUUID(),
         name,
         email,
         phone,
@@ -42,6 +43,7 @@ export const createLead = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to create lead', detail: error.message });
   }
 };
+
 
 export const updateLead = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;

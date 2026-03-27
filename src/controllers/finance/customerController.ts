@@ -10,14 +10,9 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
 
   try {
     const customers = await prisma.legacyCustomer.findMany({
-      where: companyId ? { 
-        OR: [
-          { company_id: String(companyId) },
-          { company_id: null },
-          { company_id: '' }
-        ]
-      } : {}
+      where: companyId ? { company_id: String(companyId) } : {}
     });
+
 
     const mapped = customers.map(c => ({
       id: c.id.toString(),
