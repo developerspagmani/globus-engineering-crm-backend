@@ -39,6 +39,8 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         subTotal: parseFloat(inv.total || '0'),
         grandTotal: parseFloat(inv.grand_total || '0'),
         discount: parseFloat(inv.discount || '0'),
+        gstin: inv.gstin || '',
+        state: inv.state || '',
         status: inv.status || 'DRAFT'
       };
       return mapped;
@@ -54,7 +56,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
   const {
     invoiceNumber, date, dueDate, customerId, customerName,
     address, subTotal, grandTotal, items, billType, inwardId, company_id, companyId, notes,
-    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate
+    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.company_id || company_id || companyId;
@@ -101,6 +103,8 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
           inward_id: inwardId ? String(inwardId) : null,
           company_id: String(finalCompanyId || '').toLowerCase(),
           status: 'BILLED',
+          gstin: gstin || null,
+          state: state || null,
           notes: notes || ''
         }
       });
@@ -153,7 +157,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
     date, dueDate, customerId, customerName,
-    address, subTotal, grandTotal, items, billType, inwardId, status, notes
+    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state
   } = req.body;
 
   try {
@@ -177,6 +181,8 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
         dc_no: req.body.dc_no || req.body.dcNo,
         dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
         status: status?.toUpperCase(),
+        gstin: gstin,
+        state: state,
         notes: notes
       }
     });

@@ -111,6 +111,8 @@ model LegacyInvoice {
   sub_total      Float?
   tax_total      Float?
   inward_id      String?   @db.VarChar(50)
+  gstin          String?   @db.VarChar(15)
+  state          String?   @db.VarChar(100)
   notes          String?   @db.Text
 
   @@map("tbl_invoice")
