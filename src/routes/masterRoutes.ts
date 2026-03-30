@@ -8,13 +8,65 @@ const router = Router();
 /**
  * @openapi
  * /api/items:
- *   get: { summary: Get items, tags: [Master Data], parameters: [{ in: query, name: companyId, schema: { type: string } }], responses: { 200: { description: List of items } } }
- *   post: { summary: Create item, tags: [Master Data], responses: { 201: { description: Created } } }
+ *   get:
+ *     summary: Get items
+ *     tags: [Master Data]
+ *     parameters: [{ in: query, name: companyId, schema: { type: string } }]
+ *     responses:
+ *       200:
+ *         description: List of items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id: { type: string }
+ *                   item_code: { type: string }
+ *                   item_name: { type: string }
+ *   post:
+ *     summary: Create item
+ *     tags: [Master Data]
+ *     responses: { 201: { description: Created } }
  * /api/processes:
- *   get: { summary: Get processes, tags: [Master Data], parameters: [{ in: query, name: companyId, schema: { type: string } }], responses: { 200: { description: List of processes } } }
+ *   get:
+ *     summary: Get processes
+ *     tags: [Master Data]
+ *     parameters: [{ in: query, name: companyId, schema: { type: string } }]
+ *     responses:
+ *       200:
+ *         description: List of processes
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id: { type: string }
+ *                   process_name: { type: string }
  *   post: { summary: Create process, tags: [Master Data], responses: { 201: { description: Created } } }
  * /api/price-fixings:
- *   get: { summary: Get price fixings, tags: [Master Data], parameters: [{ in: query, name: companyId, schema: { type: string } }], responses: { 200: { description: List of entries } } }
+ *   get:
+ *     summary: Get price fixings
+ *     tags: [Master Data]
+ *     parameters: [{ in: query, name: companyId, schema: { type: string } }]
+ *     responses:
+ *       200:
+ *         description: List of entries
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id: { type: string }
+ *                   customer_name: { type: string }
+ *                   item_name: { type: string }
+ *                   process_name: { type: string }
+ *                   price: { type: number }
  *   post: { summary: Create price fixing, tags: [Master Data], responses: { 201: { description: Created } } }
  */
 // Items

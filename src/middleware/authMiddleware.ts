@@ -15,6 +15,7 @@ export interface ModulePermission {
 export interface AuthRequest extends Request {
   user?: {
     id: string;
+    name: string;
     email: string;
     role: 'super_admin' | 'company_admin' | 'admin' | 'sales' | 'staff';
     company_id: string | null;

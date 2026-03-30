@@ -17,6 +17,7 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
     const mapped = customers.map(c => ({
       id: c.id.toString(),
       name: c.customer_name,
+      company: c.customer_name,
       email: c.email,
       phone: c.phone,
       industry: c.industry,

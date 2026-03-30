@@ -6,9 +6,40 @@ import * as voucherController from '../controllers/finance/voucherController';
 import * as ledgerController from '../controllers/finance/ledgerController';
 import * as challanController from '../controllers/finance/challanController';
 import * as gstController from '../controllers/finance/gstController';
+import * as statsController from '../controllers/finance/statsController';
+import * as auditController from '../controllers/system/auditController';
 import { checkPermission } from '../middleware/authMiddleware';
 
 const router = Router();
+
+/**
+ * @openapi
+ * /api/finance/stats:
+ *   get:
+ *     summary: Get dashboard financial statistics
+ *     tags: [Finance]
+ *     responses:
+ *       200:
+ *         description: Aggregated financial stats
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 summary:
+ *                   type: object
+ *                   properties:
+ *                     totalInvoiced: { type: number }
+ *                     totalPaid: { type: number }
+ *                     pendingAmount: { type: number }
+ *                     customerCount: { type: number }
+ *                     vendorCount: { type: number }
+ *                     overdueCount: { type: number }
+ *                 overdueInvoices:
+ *                   type: array
+ *                   items: { type: object }
+ */
+router.get('/finance/stats', checkPermission('mod_invoice', 'canRead') as any, statsController.getFinanceStats);
 
 /**
  * @openapi
@@ -172,5 +203,12 @@ router.delete('/challans/:id', checkPermission('mod_challan', 'canDelete') as an
  *   get: { summary: Verify any GSTIN, tags: [Finance] }
  */
 router.get('/gst-lookup', gstController.getGstDetails);
+
+/**
+ * @openapi
+ * /api/audit-logs:
+ *   get: { summary: Get activity history, tags: [System] }
+ */
+router.get('/audit-logs', checkPermission('mod_user_management', 'canRead') as any, auditController.getAuditLogs);
 
 export default router;

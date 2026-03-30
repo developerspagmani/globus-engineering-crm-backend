@@ -1,6 +1,8 @@
 import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
+import { logAudit } from '../../utils/auditLogger';
+import crypto from 'crypto';
 
 export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
@@ -147,6 +149,17 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       return newInvoice;
     });
 
+    // Logging Audit
+    await logAudit({
+      action: 'CREATE',
+      entity: 'Invoice',
+      entity_id: String(invoice.id),
+      user_id: user?.id || 'unknown',
+      user_name: user?.name || 'Unknown User',
+      company_id: finalCompanyId,
+      details: { invoice_no: invoice.invoice_no, customer: customerName, amount: grandTotal }
+    });
+
     res.status(201).json(invoice);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to create invoice', detail: error.message });
@@ -186,6 +199,18 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
         notes: notes
       }
     });
+
+    // Logging Audit
+    await logAudit({
+      action: 'UPDATE',
+      entity: 'Invoice',
+      entity_id: String(id),
+      user_id: (req as any).user?.id || 'unknown',
+      user_name: (req as any).user?.name || 'Unknown User',
+      company_id: (req as any).user?.company_id,
+      details: { invoice_no: invoice.invoice_no, status, grandTotal, date }
+    });
+
     res.json(invoice);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update invoice', detail: error.message });
@@ -198,6 +223,17 @@ export const deleteInvoice = async (req: AuthRequest, res: Response) => {
     await (prisma as any).legacyInvoice.delete({
       where: { id: parseInt(String(id)) }
     });
+
+    // Logging Audit
+    await logAudit({
+      action: 'DELETE',
+      entity: 'Invoice',
+      entity_id: String(id),
+      user_id: (req as any).user?.id || 'unknown',
+      user_name: (req as any).user?.name || 'Unknown User',
+      company_id: (req as any).user?.company_id,
+    });
+
     res.json({ message: 'Invoice deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to delete invoice', detail: error.message });
@@ -206,7 +242,8 @@ export const deleteInvoice = async (req: AuthRequest, res: Response) => {
 
 export const getNextNumbers = async (req: AuthRequest, res: Response) => {
   const user = req.user;
-  const companyId = user?.company_id || (user as any)?.companyId;
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
+  const companyId = (user?.company_id || (user as any)?.companyId) || queryCompanyId;
 
   if (!companyId) return res.status(400).json({ error: 'Company context required' });
 

@@ -1,0 +1,82 @@
+import { Response } from 'express';
+import prisma from '../../config/prisma';
+import { AuthRequest } from '../../middleware/authMiddleware';
+
+/**
+ * Aggregates financial data for the dashboard
+ */
+export const getFinanceStats = async (req: AuthRequest, res: Response) => {
+  const companyId = req.user?.company_id;
+  
+  if (!companyId) {
+    return res.status(400).json({ error: 'Company ID is required for dashboard statistics.' });
+  }
+
+  try {
+    // 1. Fetch all invoices for the company
+    const invoices = await prisma.legacyInvoice.findMany({
+      where: { company_id: companyId },
+      select: { 
+        grand_total: true, 
+        paid_amount: true, 
+        status: true,
+        due_date: true,
+        invoice_no: true,
+        customer_name: true
+      }
+    });
+
+    let totalInvoiced = 0;
+    let totalPaid = 0;
+    let overdueCount = 0;
+    const overdueInvoices: any[] = [];
+    
+    const today = new Date();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    invoices.forEach(inv => {
+      const grandTotal = parseFloat(inv.grand_total || '0') || 0;
+      const paidAmount = parseFloat(inv.paid_amount || '0') || 0;
+      
+      totalInvoiced += grandTotal;
+      totalPaid += paidAmount;
+
+      // Check if overdue (> 30 days old and not fully paid)
+      const isUnpaid = paidAmount < grandTotal && inv.status !== 'PAID';
+      if (isUnpaid && inv.due_date && inv.due_date < thirtyDaysAgo) {
+        overdueCount++;
+        if (overdueInvoices.length < 10) {
+          overdueInvoices.push({
+            id: (inv as any).id,
+            invoice_no: inv.invoice_no,
+            customer: inv.customer_name,
+            amount: grandTotal,
+            pending: grandTotal - paidAmount,
+            due_date: inv.due_date
+          });
+        }
+      }
+    });
+
+    // 2. Count Active Customers & Vendors
+    const customerCount = await prisma.legacyCustomer.count({ where: { company_id: companyId, status: 'active' } });
+    const vendorCount = await prisma.vendor.count({ where: { company_id: companyId, status: 'active' } });
+
+    res.json({
+      summary: {
+        totalInvoiced: Math.round(totalInvoiced * 100) / 100,
+        totalPaid: Math.round(totalPaid * 100) / 100,
+        pendingAmount: Math.round((totalInvoiced - totalPaid) * 100) / 100,
+        customerCount,
+        vendorCount,
+        overdueCount
+      },
+      overdueInvoices
+    });
+
+  } catch (error: any) {
+    console.error('DASHBOARD STATS ERROR:', error);
+    res.status(500).json({ error: 'Failed to aggregate dashboard data', detail: error.message });
+  }
+};
