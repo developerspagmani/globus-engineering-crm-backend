@@ -52,3 +52,61 @@ export const updateUserPermissions = async (req: AuthRequest, res: Response) => 
     res.status(500).json({ error: 'Failed to update permissions', detail: error.message });
   }
 };
+
+export const updateUser = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { name, email, role, company_id, module_permissions } = req.body;
+  try {
+    const dataToUpdate: any = {
+      name,
+      email,
+      role,
+      company_id
+    };
+    if (module_permissions) {
+      dataToUpdate.module_permissions = JSON.stringify(module_permissions);
+    }
+    const user = await prisma.user.update({
+      where: { id: String(id) },
+      data: dataToUpdate
+    });
+    res.json({ user: { ...user, password: '' } });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to update user', detail: error.message });
+  }
+};
+
+export const deleteUser = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    await prisma.user.delete({
+      where: { id: String(id) }
+    });
+    res.json({ message: 'User deleted successfully' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to delete user', detail: error.message });
+  }
+};
+
+export const resetPassword = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'New password is required' });
+  }
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const user = await prisma.user.update({
+      where: { id: String(id) },
+      data: {
+        password: hashedPassword
+      }
+    });
+
+    res.json({ message: 'Password updated successfully', user: { ...user, password: '' } });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to reset password', detail: error.message });
+  }
+};

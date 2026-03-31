@@ -94,3 +94,24 @@ export const getMe = async (req: any, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch user', detail: error.message });
   }
 };
+
+export const resetPasswordDirect = async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  try {
+    const user = await prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await prisma.user.update({
+      where: { email },
+      data: { password: hashedPassword }
+    });
+
+    res.json({ message: 'Password reset successful' });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Password reset failed', detail: error.message });
+  }
+};
+

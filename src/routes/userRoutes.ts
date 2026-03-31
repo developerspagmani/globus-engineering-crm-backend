@@ -15,5 +15,8 @@ const router = Router();
 router.get('/users', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.getAllUsers);
 router.post('/users', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.createUser);
 router.patch('/users/:id/permissions', authorize(['super_admin', 'admin']) as any, userController.updateUserPermissions);
+router.put('/users/:id', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.updateUser);
+router.put('/users/:id/reset-password', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.resetPassword);
+router.delete('/users/:id', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.deleteUser);
 
 export default router;
