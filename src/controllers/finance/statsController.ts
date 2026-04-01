@@ -14,7 +14,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
 
   try {
     // 1. Run queries in parallel to save time and reduce connection hold duration
-    const [invoices, customerCount, vendorCount] = await Promise.all([
+    const [invoices, customerCount, vendorCount, latestInvoices, latestInwards] = await Promise.all([
       prisma.legacyInvoice.findMany({
         where: { company_id: companyId },
         select: { 
@@ -27,7 +27,33 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
         }
       }),
       prisma.legacyCustomer.count({ where: { company_id: companyId, status: 'active' } }),
-      prisma.vendor.count({ where: { company_id: companyId, status: 'active' } })
+      prisma.vendor.count({ where: { company_id: companyId, status: 'active' } }),
+      prisma.legacyInvoice.findMany({
+        where: { company_id: companyId },
+        orderBy: { app_created_at: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          invoice_no: true,
+          invoice_date: true,
+          customer_name: true,
+          grand_total: true,
+          status: true
+        }
+      }),
+      prisma.inwardEntry.findMany({
+        where: { company_id: companyId },
+        orderBy: { created_at: 'desc' },
+        take: 5,
+        select: {
+          id: true,
+          inward_no: true,
+          date: true,
+          vendor_name: true,
+          customer_name: true,
+          status: true
+        }
+      })
     ]);
 
     let totalInvoiced = 0;
@@ -73,7 +99,9 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
         vendorCount,
         overdueCount
       },
-      overdueInvoices
+      overdueInvoices,
+      latestInvoices,
+      latestInwards
     });
 
   } catch (error: any) {
