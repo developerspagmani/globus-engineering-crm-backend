@@ -9,9 +9,14 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
   const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
 
   try {
-    const leads = await prisma.lead.findMany({
-      where: companyId ? { company_id: String(companyId) } : {}
-    });
+    const where: any = companyId ? { company_id: String(companyId) } : {};
+    
+    // Security: Filter by area if user is Sales
+    if (user?.role === 'sales' && user?.assigned_area) {
+      where.assigned_area = user.assigned_area;
+    }
+
+    const leads = await prisma.lead.findMany({ where });
     res.json(leads);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch leads', detail: error.message });
@@ -19,7 +24,7 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
 };
 
 export const createLead = async (req: AuthRequest, res: Response) => {
-  const { id, name, email, phone, company, industry, source, status, notes } = req.body;
+  const { id, name, email, phone, company, industry, source, status, notes, assigned_area, product_interest, next_visit_date } = req.body;
   const user = req.user;
 
   try {
@@ -35,7 +40,10 @@ export const createLead = async (req: AuthRequest, res: Response) => {
         status: status || 'new',
         agent_id: user?.id,
         company_id: user?.company_id,
-        notes
+        notes,
+        assigned_area,
+        product_interest,
+        next_visit_date: next_visit_date ? new Date(next_visit_date) : null
       }
     });
     res.status(201).json(lead);
@@ -47,11 +55,23 @@ export const createLead = async (req: AuthRequest, res: Response) => {
 
 export const updateLead = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
-  const { name, email, phone, company, industry, source, status, notes } = req.body;
+  const { name, email, phone, company, industry, source, status, notes, assigned_area, product_interest, next_visit_date } = req.body;
   try {
     const lead = await prisma.lead.update({
       where: { id },
-      data: { name, email, phone, company, industry, source, status, notes }
+      data: { 
+        name, 
+        email, 
+        phone, 
+        company, 
+        industry, 
+        source, 
+        status, 
+        notes,
+        assigned_area,
+        product_interest,
+        next_visit_date: next_visit_date ? new Date(next_visit_date) : null
+      }
     });
     res.json(lead);
   } catch (error: any) {

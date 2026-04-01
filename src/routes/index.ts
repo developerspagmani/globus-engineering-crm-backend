@@ -7,6 +7,7 @@ import logisticsRoutes from './logisticsRoutes';
 import financeRoutes from './financeRoutes';
 import masterRoutes from './masterRoutes';
 import employeeRoutes from './employeeRoutes';
+import storeRoutes from './storeRoutes';
 import * as companyController from '../controllers/company/companyController';
 import * as gstController from '../controllers/finance/gstController';
 import { authenticate } from '../middleware/authMiddleware';
@@ -58,5 +59,6 @@ router.use('/', logisticsRoutes);  // Handles /inward, /outward
 router.use('/', financeRoutes);    // Handles /invoices, /ledger, /challans, /vouchers, /vendors, /customers
 router.use('/', masterRoutes);     // Handles /items, /processes, /price-fixings
 router.use('/', employeeRoutes);   // Handles /employees
+router.use('/stores', storeRoutes);      // Handles /stores, /stores/visit, etc.
 
 export default router;

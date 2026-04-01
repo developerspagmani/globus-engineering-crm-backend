@@ -44,37 +44,46 @@ export const login = async (req: Request, res: Response) => {
         email: user.email, 
         role: user.role, 
         company_id: user.company_id,
+        assigned_area: (user as any).assigned_area,
         module_permissions: user.module_permissions ? JSON.parse(user.module_permissions) : []
       },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { ...user, password: '' } });
+    res.json({ 
+      token, 
+      user: { 
+        ...user, 
+        password: '',
+        assignedArea: (user as any).assigned_area,
+        modulePermissions: user.module_permissions ? JSON.parse(user.module_permissions) : []
+      } 
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Login failed', detail: error.message });
   }
 };
 
 export const register = async (req: Request, res: Response) => {
-  const { name, email, password, role, company_id } = req.body;
-  try {
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      return res.status(400).json({ error: 'User already exists' });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
-      data: {
-        id: crypto.randomUUID(),
-        name,
-        email,
-        password: hashedPassword,
-        role,
-        company_id
+    const { name, email, password, role, company_id, assigned_area } = req.body;
+    try {
+      const existingUser = await prisma.user.findUnique({ where: { email } });
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists' });
       }
-    });
+
+      const user = await prisma.user.create({
+        data: {
+          id: crypto.randomUUID(),
+          name,
+          email,
+          password,
+          role,
+          company_id,
+          assigned_area
+        }
+      });
 
     res.status(201).json({ user: { ...user, password: '' } });
   } catch (error: any) {

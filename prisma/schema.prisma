@@ -139,6 +139,7 @@ model User {
   phone              String? @db.VarChar(50)
   role               String  @db.VarChar(50)
   company_id         String? @db.VarChar(50)
+  assigned_area      String? @db.VarChar(100)
   permissions        String? @db.Text
   module_permissions String? @db.Text
   company            Company? @relation(fields: [company_id], references: [id])
@@ -147,21 +148,51 @@ model User {
 }
 
 model Lead {
-  id         String    @id @db.VarChar(50)
-  name       String    @db.VarChar(255)
-  email      String?   @db.VarChar(255)
-  phone      String?   @db.VarChar(50)
-  company    String?   @db.VarChar(255)
-  industry   String?   @db.VarChar(100)
-  source     String?   @db.VarChar(100)
-  status     String?   @db.VarChar(50)
-  agent_id   String?   @db.VarChar(50)
-  company_id String?   @db.VarChar(50)
-  notes      String?   @db.Text
-  created_at DateTime? @default(now()) @db.Timestamp(0)
-  company_rel Company? @relation(fields: [company_id], references: [id])
+  id                 String    @id @db.VarChar(50)
+  name               String    @db.VarChar(255)
+  email              String?   @db.VarChar(255)
+  phone              String?   @db.VarChar(50)
+  company            String?   @db.VarChar(255)
+  industry           String?   @db.VarChar(100)
+  source             String?   @db.VarChar(100)
+  status             String?   @db.VarChar(50)
+  agent_id           String?   @db.VarChar(50)
+  company_id         String?   @db.VarChar(50)
+  assigned_area      String?   @db.VarChar(100)
+  created_at         DateTime? @default(now()) @db.Timestamp(0)
+  company_rel        Company? @relation(fields: [company_id], references: [id])
 
   @@map("app_leads")
+}
+
+model Store {
+  id                String      @id @db.VarChar(50)
+  name              String      @db.VarChar(255)
+  owner_name        String?     @db.VarChar(255)
+  phone             String?     @db.VarChar(50)
+  address           String?     @db.Text
+  area              String?     @db.VarChar(100)
+  city              String?     @db.VarChar(100)
+  assigned_agent_id String?     @db.VarChar(50)
+  company_id        String?     @db.VarChar(50)
+  created_at        DateTime?   @default(now()) @db.Timestamp(0)
+  visits            StoreVisit[]
+
+  @@map("app_stores")
+}
+
+model StoreVisit {
+  id                String    @id @db.VarChar(50)
+  store_id          String    @db.VarChar(50)
+  agent_id          String    @db.VarChar(50)
+  visit_date        DateTime  @db.Date
+  notes             String?   @db.Text
+  product_interest  String?   @db.Text
+  next_visit_date   DateTime? @db.Date
+  created_at        DateTime? @default(now()) @db.Timestamp(0)
+  store             Store     @relation(fields: [store_id], references: [id])
+
+  @@map("app_store_visits")
 }
 
 model Deal {
