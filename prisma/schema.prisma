@@ -136,6 +136,7 @@ model User {
   name               String  @db.VarChar(255)
   email              String  @unique(map: "email") @db.VarChar(255)
   password           String  @db.VarChar(255)
+  phone              String? @db.VarChar(50)
   role               String  @db.VarChar(50)
   company_id         String? @db.VarChar(50)
   permissions        String? @db.Text

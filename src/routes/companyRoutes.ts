@@ -12,7 +12,7 @@ const router = Router();
  */
 router.get('/companies', companyController.getAllCompanies);
 router.post('/companies', authorize(['super_admin']) as any, companyController.createCompany);
-router.put('/companies/:id', authorize(['super_admin']) as any, companyController.updateCompany);
+router.put('/companies/:id', authorize(['super_admin', 'company_admin']) as any, companyController.updateCompany);
 router.delete('/companies/:id', authorize(['super_admin']) as any, companyController.deleteCompany);
 
 export default router;

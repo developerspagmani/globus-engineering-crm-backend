@@ -27,7 +27,7 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
 export const createChallan = async (req: AuthRequest, res: Response) => {
   const { id, challan_no, party_id, party_name, party_type, type, status, items, vehicle_no, driver_name, company_id } = req.body;
   const user = req.user;
-  const finalCompanyId = user?.role === 'super_admin' ? company_id : user?.company_id;
+  const finalCompanyId = user?.role === 'super_admin' ? (company_id || (req.body as any).companyId) : (user?.company_id || (user as any)?.companyId || company_id || (req.body as any).companyId);
 
   try {
     const challan = await prisma.challan.create({
@@ -37,7 +37,7 @@ export const createChallan = async (req: AuthRequest, res: Response) => {
         party_id,
         party_name,
         party_type,
-        company_id: finalCompanyId,
+        company_id: String(finalCompanyId || ''),
         date: new Date(),
         type,
         status: status || 'Pending',

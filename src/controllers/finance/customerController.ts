@@ -10,7 +10,12 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
 
   try {
     const customers = await prisma.legacyCustomer.findMany({
-      where: companyId ? { company_id: String(companyId) } : {}
+      where: companyId ? { 
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() }
+        ]
+      } : {}
     });
 
 
@@ -18,8 +23,8 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
       id: c.id.toString(),
       name: c.customer_name,
       company: c.customer_name,
-      email: c.email,
-      phone: c.phone,
+      email: c.email || c.email_id1 || c.email_id2 || c.email_id3,
+      phone: c.phone || c.phone_number1 || c.phone_number2 || c.phone_number3,
       industry: c.industry,
       status: c.status,
       street1: c.street1,

@@ -13,18 +13,22 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
   }
 
   try {
-    // 1. Fetch all invoices for the company
-    const invoices = await prisma.legacyInvoice.findMany({
-      where: { company_id: companyId },
-      select: { 
-        grand_total: true, 
-        paid_amount: true, 
-        status: true,
-        due_date: true,
-        invoice_no: true,
-        customer_name: true
-      }
-    });
+    // 1. Run queries in parallel to save time and reduce connection hold duration
+    const [invoices, customerCount, vendorCount] = await Promise.all([
+      prisma.legacyInvoice.findMany({
+        where: { company_id: companyId },
+        select: { 
+          grand_total: true, 
+          paid_amount: true, 
+          status: true,
+          due_date: true,
+          invoice_no: true,
+          customer_name: true
+        }
+      }),
+      prisma.legacyCustomer.count({ where: { company_id: companyId, status: 'active' } }),
+      prisma.vendor.count({ where: { company_id: companyId, status: 'active' } })
+    ]);
 
     let totalInvoiced = 0;
     let totalPaid = 0;
@@ -36,6 +40,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
     thirtyDaysAgo.setDate(today.getDate() - 30);
 
     invoices.forEach(inv => {
+      // Safely parse decimals from strings
       const grandTotal = parseFloat(inv.grand_total || '0') || 0;
       const paidAmount = parseFloat(inv.paid_amount || '0') || 0;
       
@@ -43,7 +48,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       totalPaid += paidAmount;
 
       // Check if overdue (> 30 days old and not fully paid)
-      const isUnpaid = paidAmount < grandTotal && inv.status !== 'PAID';
+      const isUnpaid = paidAmount < (grandTotal - 0.01) && inv.status !== 'PAID';
       if (isUnpaid && inv.due_date && inv.due_date < thirtyDaysAgo) {
         overdueCount++;
         if (overdueInvoices.length < 10) {
@@ -52,16 +57,12 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
             invoice_no: inv.invoice_no,
             customer: inv.customer_name,
             amount: grandTotal,
-            pending: grandTotal - paidAmount,
+            pending: Math.max(0, grandTotal - paidAmount),
             due_date: inv.due_date
           });
         }
       }
     });
-
-    // 2. Count Active Customers & Vendors
-    const customerCount = await prisma.legacyCustomer.count({ where: { company_id: companyId, status: 'active' } });
-    const vendorCount = await prisma.vendor.count({ where: { company_id: companyId, status: 'active' } });
 
     res.json({
       summary: {

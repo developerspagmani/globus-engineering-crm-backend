@@ -13,7 +13,12 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
 
   try {
     const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: companyId ? { company_id: String(companyId) } : {},
+      where: companyId ? { 
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() }
+        ]
+      } : {},
       orderBy: { invoice_date: 'desc' }
     });
 

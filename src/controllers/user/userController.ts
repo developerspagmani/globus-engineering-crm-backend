@@ -55,11 +55,12 @@ export const updateUserPermissions = async (req: AuthRequest, res: Response) => 
 
 export const updateUser = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { name, email, role, company_id, module_permissions } = req.body;
+  const { name, email, phone, role, company_id, module_permissions } = req.body;
   try {
     const dataToUpdate: any = {
       name,
       email,
+      phone,
       role,
       company_id
     };
