@@ -19,6 +19,7 @@ export interface AuthRequest extends Request {
     email: string;
     role: 'super_admin' | 'company_admin' | 'admin' | 'sales' | 'staff';
     company_id: string | null;
+    assigned_area?: string | null;
     module_permissions?: ModulePermission[];
   };
 }

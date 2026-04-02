@@ -7,10 +7,43 @@ const router = Router();
 /**
  * @openapi
  * /api/users:
- *   get: { summary: Get all users, tags: [Administration], responses: { 200: { description: List of users } } }
- *   post: { summary: Create user, tags: [Administration], responses: { 201: { description: Created } } }
+ *   get:
+ *     summary: Get all users
+ *     tags: [Administration]
+ *     security: [{ bearerAuth: [] }]
+ *     responses: { 200: { description: List of users } }
+ *   post:
+ *     summary: Create user
+ *     tags: [Administration]
+ *     security: [{ bearerAuth: [] }]
+ *     responses: { 201: { description: Created } }
+ * /api/users/{id}:
+ *   put:
+ *     summary: Update user
+ *     tags: [Administration]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Updated } }
+ *   delete:
+ *     summary: Delete user
+ *     tags: [Administration]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Deleted } }
  * /api/users/{id}/permissions:
- *   patch: { summary: Update user permissions, tags: [Administration], responses: { 200: { description: Updated } } }
+ *   patch:
+ *     summary: Update user permissions
+ *     tags: [Administration]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Updated } }
+ * /api/users/{id}/reset-password:
+ *   put:
+ *     summary: Reset user password
+ *     tags: [Administration]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Password updated } }
  */
 router.get('/users', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.getAllUsers);
 router.post('/users', authorize(['super_admin', 'admin', 'company_admin']) as any, userController.createUser);

@@ -26,7 +26,7 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
 
 export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   const { 
-    outward_no, customer_id, customer_name, invoice_reference, challan_no, vehicle_no, status, items, company_id 
+    outward_no, customer_id, customer_name, invoice_reference, challan_no, vehicle_no, status, items, company_id, inward_id, inward_no
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? company_id : user?.company_id;
@@ -42,6 +42,8 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
         challan_no: String(challan_no || ''),
         vehicle_no: String(vehicle_no || ''),
         company_id: finalCompanyId,
+        inward_id: String(inward_id || ''),
+        inward_no: String(inward_no || ''),
         status: status || 'dispatched',
         items_json: JSON.stringify(items || []),
         date: new Date()

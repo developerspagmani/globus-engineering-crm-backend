@@ -8,7 +8,7 @@ import crypto from 'crypto';
  */
 
 export const getAllStores = async (req: AuthRequest, res: Response) => {
-  const { company_id, role, id: userId, assigned_area } = req.user;
+  const { company_id, role, id: userId, assigned_area } = req.user as any;
   try {
     const where: any = { company_id };
 
@@ -54,7 +54,7 @@ export const getAllStores = async (req: AuthRequest, res: Response) => {
 
 export const createStore = async (req: AuthRequest, res: Response) => {
   const { name, owner_name, phone, address, area, city } = req.body;
-  const { company_id, id: userId } = req.user;
+  const { company_id, id: userId } = req.user as any;
   try {
     const store = await prisma.store.create({
       data: {
@@ -147,7 +147,7 @@ export const getStoreVisits = async (req: AuthRequest, res: Response) => {
 
 export const addStoreLog = async (req: AuthRequest, res: Response) => {
   const { store_id, notes, product_interest, next_visit_date, visit_date } = req.body;
-  const { id: userId } = req.user;
+  const { id: userId } = req.user as any;
   try {
     const visit = await prisma.storeVisit.create({
       data: {

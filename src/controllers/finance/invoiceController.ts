@@ -66,7 +66,8 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state
   } = req.body;
   const user = req.user;
-  const finalCompanyId = user?.company_id || company_id || companyId;
+  const rawCompanyId = user?.company_id || company_id || companyId;
+  const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
 
   try {
     const invNo = invoiceNumber ? parseInt(String(invoiceNumber).replace(/\D/g, '')) : null;
@@ -119,10 +120,11 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       if (inwardId) {
         await tx.inwardEntry.update({
           where: { id: String(inwardId) },
-          data: { status: 'completed' }
+          data: { status: 'partial' } // Changed from 'completed' to support multiple invoices
         });
       }
 
+      // 3. Update Ledger with running balance
       const lastEntry = await tx.ledgerEntry.findFirst({
         where: {
           party_id: String(customerId),
@@ -131,11 +133,13 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         orderBy: { created_at: 'desc' }
       });
 
-      const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-      const amountAsFloat = parseFloat(grandTotal || '0');
+      const lastBalance = (lastEntry as any)?.balance ?? 0;
+      // Clean numeric strings of characters like ₹, commas, etc.
+      const rawGrandTotal = String(grandTotal || '0').replace(/[^\d.]/g, '');
+      const amountAsFloat = parseFloat(rawGrandTotal);
       const newBalance = lastBalance + amountAsFloat;
 
-      await tx.ledgerEntry.create({
+      await (tx as any).ledgerEntry.create({
         data: {
           id: crypto.randomUUID(),
           party_id: String(customerId),
@@ -146,9 +150,9 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
           type: 'debit',
           amount: amountAsFloat,
           balance: newBalance,
-          description: `Invoice Generated: ${newInvoice.invoice_no}`,
+          description: `Invoice Generated: ${newInvoice.invoice_no || newInvoice.id}`,
           reference_id: String(newInvoice.id)
-        } as any
+        }
       });
 
       return newInvoice;

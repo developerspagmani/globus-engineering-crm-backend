@@ -285,6 +285,8 @@ model OutwardEntry {
   challan_no        String?   @db.VarChar(100)
   vehicle_no        String?   @db.VarChar(50)
   company_id        String?   @db.VarChar(50)
+  inward_id         String?   @db.VarChar(50)
+  inward_no         String?   @db.VarChar(50)
   date              DateTime? @db.Date
   status            String?   @db.VarChar(50)
   items_json        String?   @db.Text

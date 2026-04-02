@@ -16,6 +16,7 @@ const router = Router();
  */
 // Inward Entry
 router.get('/inward', checkPermission('mod_inward', 'canRead') as any, inwardController.getInwardEntries);
+router.get('/inward/pending/:customerId', checkPermission('mod_inward', 'canRead') as any, inwardController.getPendingInwardsByCustomer);
 router.post('/inward', checkPermission('mod_inward', 'canCreate') as any, inwardController.createInwardEntry);
 router.put('/inward/:id', checkPermission('mod_inward', 'canEdit') as any, inwardController.updateInwardEntry);
 router.delete('/inward/:id', checkPermission('mod_inward', 'canDelete') as any, inwardController.deleteInwardEntry);

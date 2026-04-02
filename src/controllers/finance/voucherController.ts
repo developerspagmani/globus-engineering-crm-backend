@@ -26,9 +26,10 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 };
 
 export const createVoucher = async (req: AuthRequest, res: Response) => {
-  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, status } = req.body;
+  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status } = req.body;
   const user = req.user;
-  const finalCompanyId = company_id || user?.company_id || (user as any)?.companyId;
+  const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
+  const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
 
   try {
     const finalAmount = parseFloat(String(amount || '0'));
@@ -56,10 +57,11 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
       });
 
       // 2. If it's a receipt from a customer, update the Invoice and Ledger
-      if (type === 'receipt' && party_type === 'customer' && reference_no) {
-        const invNumbers = String(reference_no).split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (type === 'receipt' && party_type === 'customer') {
+        const invNumbers = reference_no ? String(reference_no).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
         
         if (invNumbers.length > 0) {
+          // ... (existing invoice status update logic is fine, keeping it for auto-reconciliation)
           const invNumsAsInts = invNumbers.map((n: string) => {
             const onlyDigits = n.replace(/\D/g, '');
             return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
@@ -88,11 +90,9 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           let remainingAmount = finalAmount;
           for (const inv of invoices) {
             if (remainingAmount <= 0) break;
-            
             const currentGrandTotal = parseFloat(inv.grand_total || '0');
             const currentPaidAmount = parseFloat(inv.paid_amount || '0');
             const balanceDue = currentGrandTotal - currentPaidAmount;
-            
             if (balanceDue <= 0) continue;
 
             const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
@@ -105,11 +105,11 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
                 status: newPaidAmount >= currentGrandTotal ? 'PAID' : 'BILLED'
               }
             });
-            
             remainingAmount -= paymentForThisInvoice;
           }
         }
 
+        // --- ALWAYS update the Ledger for any customer payment ---
         const lastEntry = await tx.ledgerEntry.findFirst({
           where: {
             party_id: String(party_id),
@@ -119,21 +119,21 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         });
 
         const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-        const newBalance = type === 'receipt' ? lastBalance - finalAmount : lastBalance + finalAmount;
+        const newBalance = lastBalance - finalAmount; // Credit decreases the balance
 
         await tx.ledgerEntry.create({
           data: {
             id: crypto.randomUUID(),
             party_id: String(party_id),
-            party_name: party_name,
+            party_name: party_name || 'N/A',
             party_type: party_type || 'customer',
             company_id: finalCompanyId ? String(finalCompanyId) : null,
             date: date ? new Date(date) : new Date(),
-            type: type === 'receipt' ? 'credit' : 'debit',
+            type: 'credit',
             amount: finalAmount,
             balance: newBalance,
-            description: `Payment Receipt: ${voucher.voucher_no} for Invoices: ${reference_no}`,
-            reference_id: voucher.voucher_no
+            description: `Payment Received: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `for Ref: ${reference_no}` : ''}`,
+            reference_id: voucher.voucher_no || voucher.id
           } as any
         });
       }

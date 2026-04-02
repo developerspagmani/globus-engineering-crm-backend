@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as itemController from '../controllers/master/itemController';
 import * as processController from '../controllers/master/processController';
 import * as priceFixingController from '../controllers/master/priceFixingController';
+import { checkPermission } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -11,80 +12,85 @@ const router = Router();
  *   get:
  *     summary: Get items
  *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: query, name: companyId, schema: { type: string } }]
  *     responses:
  *       200:
  *         description: List of items
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id: { type: string }
- *                   item_code: { type: string }
- *                   item_name: { type: string }
- *   post:
- *     summary: Create item
+ * /api/items/{id}:
+ *   put:
+ *     summary: Update item
  *     tags: [Master Data]
- *     responses: { 201: { description: Created } }
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Updated } }
+ *   delete:
+ *     summary: Delete item
+ *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Deleted } }
  * /api/processes:
  *   get:
  *     summary: Get processes
  *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: query, name: companyId, schema: { type: string } }]
  *     responses:
  *       200:
  *         description: List of processes
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id: { type: string }
- *                   process_name: { type: string }
- *   post: { summary: Create process, tags: [Master Data], responses: { 201: { description: Created } } }
+ * /api/processes/{id}:
+ *   put:
+ *     summary: Update process
+ *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Updated } }
+ *   delete:
+ *     summary: Delete process
+ *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Deleted } }
  * /api/price-fixings:
  *   get:
  *     summary: Get price fixings
  *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
  *     parameters: [{ in: query, name: companyId, schema: { type: string } }]
  *     responses:
  *       200:
  *         description: List of entries
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id: { type: string }
- *                   customer_name: { type: string }
- *                   item_name: { type: string }
- *                   process_name: { type: string }
- *                   price: { type: number }
- *   post: { summary: Create price fixing, tags: [Master Data], responses: { 201: { description: Created } } }
+ * /api/price-fixings/{id}:
+ *   put:
+ *     summary: Update price fixing
+ *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Updated } }
+ *   delete:
+ *     summary: Delete price fixing
+ *     tags: [Master Data]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+ *     responses: { 200: { description: Deleted } }
  */
 // Items
-router.get('/items', itemController.getItems);
-router.post('/items', itemController.createItem);
-router.put('/items/:id', itemController.updateItem);
-router.delete('/items/:id', itemController.deleteItem);
+router.get('/items', checkPermission('mod_items', 'canRead'), itemController.getItems);
+router.post('/items', checkPermission('mod_items', 'canCreate'), itemController.createItem);
+router.put('/items/:id', checkPermission('mod_items', 'canEdit'), itemController.updateItem);
+router.delete('/items/:id', checkPermission('mod_items', 'canDelete'), itemController.deleteItem);
 
 // Processes
-router.get('/processes', processController.getProcesses);
-router.post('/processes', processController.createProcess);
-router.put('/processes/:id', processController.updateProcess);
-router.delete('/processes/:id', processController.deleteProcess);
+router.get('/processes', checkPermission('mod_processes', 'canRead'), processController.getProcesses);
+router.post('/processes', checkPermission('mod_processes', 'canCreate'), processController.createProcess);
+router.put('/processes/:id', checkPermission('mod_processes', 'canEdit'), processController.updateProcess);
+router.delete('/processes/:id', checkPermission('mod_processes', 'canDelete'), processController.deleteProcess);
 
 // Price Fixing
-router.get('/price-fixings', priceFixingController.getPriceFixings);
-router.post('/price-fixings', priceFixingController.createPriceFixing);
-router.put('/price-fixings/:id', priceFixingController.updatePriceFixing);
-router.delete('/price-fixings/:id', priceFixingController.deletePriceFixing);
+router.get('/price-fixings', checkPermission('mod_price_fixing', 'canRead'), priceFixingController.getPriceFixings);
+router.post('/price-fixings', checkPermission('mod_price_fixing', 'canCreate'), priceFixingController.createPriceFixing);
+router.put('/price-fixings/:id', checkPermission('mod_price_fixing', 'canEdit'), priceFixingController.updatePriceFixing);
+router.delete('/price-fixings/:id', checkPermission('mod_price_fixing', 'canDelete'), priceFixingController.deletePriceFixing);
 
 export default router;

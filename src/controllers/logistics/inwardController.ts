@@ -101,6 +101,95 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Response) => {
+  const customerId = String(req.params.customerId);
+  const user = req.user;
+  const companyId = user?.company_id;
+
+  try {
+    // 0. Lookup the customer name by ID to handle name/id inconsistency in inwards
+    const isIdNumeric = !isNaN(parseInt(customerId));
+    const customer = await prisma.legacyCustomer.findFirst({
+      where: {
+        OR: [
+          ...(isIdNumeric ? [{ id: parseInt(customerId) }] : []),
+          { customer_name: String(customerId) }
+        ]
+      }
+    });
+
+    const nameToSearch = customer?.customer_name || String(customerId);
+    // console.log(`[DIAGNOSTIC] Searching for Patient: ${customerId} / ${nameToSearch}`);
+
+    // 1. Get all inwards for this customer (Temporary broad search for debugging)
+    const inwards = await prisma.inwardEntry.findMany({
+      where: {
+        OR: [
+          { customer_id: { contains: String(customerId) } },
+          { customer_name: { contains: String(customerId) } },
+          { customer_name: { contains: nameToSearch } }
+        ]
+      }
+    });
+
+    // console.log(`[DIAGNOSTIC] Total Inwards found before filter: ${inwards.length}`);
+
+    // 2. Get all invoices to calculate balance
+    const relatedInvoices = await (prisma as any).legacyInvoice.findMany({
+      where: {
+        inward_id: { in: inwards.map(i => i.id) }
+      }
+    });
+
+    // console.log(`[DIAGNOSTIC] Related Invoices found: ${relatedInvoices.length}`);
+
+    const results = inwards.map(entry => {
+      const originalItems = JSON.parse(entry.items_json || '[]');
+      const invoicedForThisEntry = relatedInvoices.filter((inv: any) => inv.inward_id === entry.id);
+      
+      const balanceItems = originalItems.map((item: any) => {
+        let totalInvoicedQty = 0;
+        invoicedForThisEntry.forEach((inv: any) => {
+          const invItems = JSON.parse(inv.items_json || '[]');
+          const matchingItem = invItems.find((ii: any) => ii.item_name === item.item_name || ii.id === item.id || (ii.description === item.description));
+          if (matchingItem) {
+            totalInvoicedQty += parseFloat(matchingItem.qty || matchingItem.quantity || '0');
+          }
+        });
+
+        const rem = parseFloat(item.quantity || item.qty || '0') - totalInvoicedQty;
+        return {
+          ...item,
+          originalQty: parseFloat(item.quantity || item.qty || '0'),
+          invoicedQty: totalInvoicedQty,
+          remainingQty: rem
+        };
+      });
+
+      const hasBalance = balanceItems.some((item: any) => item.remainingQty > 0);
+      // console.log(`[DIAGNOSTIC] Inward #${entry.inward_no}: hasBalance=${hasBalance}, Items=${balanceItems.length}`);
+
+      return {
+        id: entry.id,
+        inward_no: entry.inward_no,
+        date: entry.date,
+        po_reference: entry.po_reference,
+        po_date: entry.po_date,
+        dc_no: entry.dc_no,
+        dc_date: entry.dc_date,
+        status: entry.status,
+        items: balanceItems,
+        hasBalance
+      };
+    }).filter(r => r.hasBalance);
+
+    res.json(results);
+  } catch (error: any) {
+    console.error("[DIAGNOSTIC] CRITICAL ERROR:", error);
+    res.status(500).json({ error: 'Failed to calculate inward balance', detail: error.message });
+  }
+};
+
 export const deleteInwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
