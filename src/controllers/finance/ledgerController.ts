@@ -57,20 +57,58 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
     // Debit (+) adds to balance, Credit (-) subtracts from balance
     const newBalance = finalType === 'debit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
 
-    const entry = await prisma.ledgerEntry.create({
-      data: {
-        id: crypto.randomUUID(),
-        party_id: String(partyId),
-        party_name: partyName || 'N/A',
-        party_type: partyType || 'customer',
-        company_id: finalCompanyId ? String(finalCompanyId) : null,
-        date: new Date(entryDate),
-        type: finalType,
-        amount: finalAmount,
-        balance: newBalance,
-        description: description || '',
-        reference_id: referenceId || '',
-      } as any
+    const entry = await prisma.$transaction(async (tx) => {
+      const newEntry = await (tx as any).ledgerEntry.create({
+        data: {
+          id: crypto.randomUUID(),
+          party_id: String(partyId),
+          party_name: partyName || 'N/A',
+          party_type: partyType || 'customer',
+          company_id: finalCompanyId ? String(finalCompanyId) : null,
+          date: new Date(entryDate),
+          type: finalType,
+          amount: finalAmount,
+          balance: newBalance,
+          description: description || '',
+          reference_id: referenceId || '',
+        }
+      });
+
+      // 3. FIFO AUTO-RECONCILIATION: Pay off oldest invoices if this is a customer credit
+      if (finalType === 'credit' && (partyType || 'customer').toLowerCase() === 'customer') {
+        const pendingInvoices = await (tx as any).legacyInvoice.findMany({
+          where: {
+            customer_id: parseInt(String(partyId)),
+            status: { not: 'PAID' },
+            company_id: finalCompanyId
+          },
+          orderBy: { invoice_date: 'asc' }
+        });
+
+        let remainingToApply = finalAmount;
+        for (const inv of pendingInvoices) {
+            if (remainingToApply <= 0) break;
+            const grandTotal = parseFloat(inv.grand_total || '0');
+            const paidAmount = parseFloat(inv.paid_amount || '0');
+            const balanceDue = grandTotal - paidAmount;
+            
+            if (balanceDue <= 0) continue;
+
+            const application = Math.min(remainingToApply, balanceDue);
+            const newPaidTotal = paidAmount + application;
+
+            await (tx as any).legacyInvoice.update({
+                where: { id: inv.id },
+                data: {
+                    paid_amount: String(newPaidTotal),
+                    status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                }
+            });
+            remainingToApply -= application;
+        }
+      }
+
+      return newEntry;
     });
 
     res.status(201).json(entry);
