@@ -49,7 +49,12 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
     req.user = decoded;
     next();
   } catch (error: any) {
-    console.error('Token Verification Failed:', error.message);
+    if (error.name === 'TokenExpiredError' || error.message === 'jwt expired') {
+      // Quietly log expiration - it's a common event, not a system failure
+      console.warn(`[AUTH] Session Expired for: ${req.headers.authorization?.substring(0, 20)}...`);
+    } else {
+      console.error('Token Verification Failed:', error.message);
+    }
     res.status(401).json({ error: 'Invalid or expired token.' });
   }
 };

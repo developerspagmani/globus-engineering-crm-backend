@@ -45,7 +45,7 @@ export const login = async (req: Request, res: Response) => {
         role: user.role, 
         company_id: user.company_id,
         assigned_area: (user as any).assigned_area,
-        module_permissions: user.module_permissions ? JSON.parse(user.module_permissions) : []
+        module_permissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -57,10 +57,11 @@ export const login = async (req: Request, res: Response) => {
         ...user, 
         password: '',
         assignedArea: (user as any).assigned_area,
-        modulePermissions: user.module_permissions ? JSON.parse(user.module_permissions) : []
+        modulePermissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
       } 
     });
   } catch (error: any) {
+    console.error('[LOGIN_ERROR]', error);
     res.status(500).json({ error: 'Login failed', detail: error.message });
   }
 };

@@ -9,6 +9,7 @@ import crypto from 'crypto';
 
 export const getAllStores = async (req: AuthRequest, res: Response) => {
   const { company_id, role, id: userId, assigned_area } = req.user as any;
+  console.log('[DEBUG_STORES] User:', { userId, role, assigned_area, company_id });
   try {
     const where: any = { company_id };
 
@@ -125,7 +126,7 @@ export const getStoreVisits = async (req: AuthRequest, res: Response) => {
   const { storeId } = req.params;
   try {
     const visits = await prisma.storeVisit.findMany({
-      where: { store_id: storeId },
+      where: { store_id: String(storeId) },
       orderBy: { visit_date: 'desc' }
     });
     
@@ -177,7 +178,7 @@ export const deleteStore = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
     // Delete visits first, or ensure Prisma has cascade (if not, manually delete)
-    await prisma.storeVisit.deleteMany({ where: { store_id: id } });
+    await prisma.storeVisit.deleteMany({ where: { store_id: String(id) } });
     await prisma.store.delete({ where: { id: String(id) } });
     res.json({ message: 'Store deleted successfully' });
   } catch (error: any) {
