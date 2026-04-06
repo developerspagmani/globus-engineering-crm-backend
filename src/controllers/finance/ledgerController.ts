@@ -32,7 +32,7 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
 };
 
 export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
-  const { partyId, partyName, partyType, date, type, amount, description, referenceId, companyId, company_id } = req.body;
+  const { partyId, partyName, partyType, date, type, amount, description, referenceId, companyId, company_id, linkedInvoiceId } = req.body;
   const user = req.user;
   const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
@@ -74,37 +74,70 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
         }
       });
 
-      // 3. FIFO AUTO-RECONCILIATION: Pay off oldest invoices if this is a customer credit
+      // 3. RECONCILIATION: Pay off invoices if this is a customer credit
       if (finalType === 'credit' && (partyType || 'customer').toLowerCase() === 'customer') {
-        const pendingInvoices = await (tx as any).legacyInvoice.findMany({
-          where: {
-            customer_id: parseInt(String(partyId)),
-            status: { not: 'PAID' },
-            company_id: finalCompanyId
-          },
-          orderBy: { invoice_date: 'asc' }
-        });
-
         let remainingToApply = finalAmount;
-        for (const inv of pendingInvoices) {
-            if (remainingToApply <= 0) break;
-            const grandTotal = parseFloat(inv.grand_total || '0');
-            const paidAmount = parseFloat(inv.paid_amount || '0');
+
+        // A. PRIORITY: If a specific invoice is linked, pay it first
+        if (linkedInvoiceId) {
+          const targetInv = await (tx as any).legacyInvoice.findUnique({
+             where: { id: parseInt(String(linkedInvoiceId)) }
+          });
+
+          if (targetInv && targetInv.status !== 'PAID') {
+            const grandTotal = parseFloat(targetInv.grand_total || '0');
+            const paidAmount = parseFloat(targetInv.paid_amount || '0');
             const balanceDue = grandTotal - paidAmount;
             
-            if (balanceDue <= 0) continue;
+            if (balanceDue > 0) {
+              const application = Math.min(remainingToApply, balanceDue);
+              const newPaidTotal = paidAmount + application;
 
-            const application = Math.min(remainingToApply, balanceDue);
-            const newPaidTotal = paidAmount + application;
+              await (tx as any).legacyInvoice.update({
+                  where: { id: targetInv.id },
+                  data: {
+                      paid_amount: String(newPaidTotal),
+                      status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                  }
+              });
+              remainingToApply -= application;
+            }
+          }
+        }
 
-            await (tx as any).legacyInvoice.update({
-                where: { id: inv.id },
-                data: {
-                    paid_amount: String(newPaidTotal),
-                    status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
-                }
-            });
-            remainingToApply -= application;
+        // B. FIFO: Apply remaining amount to oldest invoices
+        if (remainingToApply > 0) {
+          const pendingInvoices = await (tx as any).legacyInvoice.findMany({
+            where: {
+              customer_id: parseInt(String(partyId)),
+              status: { not: 'PAID' },
+              company_id: finalCompanyId,
+              // If we already paid part of a linked invoice, skip it in FIFO to avoid double counting
+              id: linkedInvoiceId ? { not: parseInt(String(linkedInvoiceId)) } : undefined
+            },
+            orderBy: { invoice_date: 'asc' }
+          });
+
+          for (const inv of pendingInvoices) {
+              if (remainingToApply <= 0) break;
+              const grandTotal = parseFloat(inv.grand_total || '0');
+              const paidAmount = parseFloat(inv.paid_amount || '0');
+              const balanceDue = grandTotal - paidAmount;
+              
+              if (balanceDue <= 0) continue;
+
+              const application = Math.min(remainingToApply, balanceDue);
+              const newPaidTotal = paidAmount + application;
+
+              await (tx as any).legacyInvoice.update({
+                  where: { id: inv.id },
+                  data: {
+                      paid_amount: String(newPaidTotal),
+                      status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                  }
+              });
+              remainingToApply -= application;
+          }
         }
       }
 

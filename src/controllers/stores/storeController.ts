@@ -9,7 +9,7 @@ import crypto from 'crypto';
 
 export const getAllStores = async (req: AuthRequest, res: Response) => {
   const { company_id, role, id: userId, assigned_area } = req.user as any;
-  console.log('[DEBUG_STORES] User:', { userId, role, assigned_area, company_id });
+  // console.log('[DEBUG_STORES] User:', { userId, role, assigned_area, company_id });
   try {
     const where: any = { company_id };
 
