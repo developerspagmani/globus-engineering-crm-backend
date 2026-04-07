@@ -8,7 +8,7 @@ import * as challanController from '../controllers/finance/challanController';
 import * as gstController from '../controllers/finance/gstController';
 import * as statsController from '../controllers/finance/statsController';
 import * as auditController from '../controllers/system/auditController';
-import { checkPermission } from '../middleware/authMiddleware';
+import { checkPermission, authorize } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -122,10 +122,10 @@ router.delete('/customers/:id', checkPermission('mod_customer', 'canDelete') as 
  *     responses:
  *       201: { description: Created }
  */
-router.get('/vendors', checkPermission('mod_vendor', 'canRead') as any, vendorController.getAllVendors);
-router.post('/vendors', checkPermission('mod_vendor', 'canCreate') as any, vendorController.createVendor);
-router.put('/vendors/:id', checkPermission('mod_vendor', 'canEdit') as any, vendorController.updateVendor);
-router.delete('/vendors/:id', checkPermission('mod_vendor', 'canDelete') as any, vendorController.deleteVendor);
+router.get('/vendors', authorize(['super_admin']) as any, vendorController.getAllVendors);
+router.post('/vendors', authorize(['super_admin']) as any, vendorController.createVendor);
+router.put('/vendors/:id', authorize(['super_admin']) as any, vendorController.updateVendor);
+router.delete('/vendors/:id', authorize(['super_admin']) as any, vendorController.deleteVendor);
 
 /**
  * @openapi
