@@ -35,7 +35,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   // console.log('Auth Header:', authHeader ? 'Present' : 'MISSING');
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    console.warn('Auth Failure: No Bearer token provided');
+    // console.warn('Auth Failure: No Bearer token provided');
     return res.status(401).json({ error: 'Access denied. No token provided.' });
   }
 
@@ -51,9 +51,9 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   } catch (error: any) {
     if (error.name === 'TokenExpiredError' || error.message === 'jwt expired') {
       // Quietly log expiration - it's a common event, not a system failure
-      console.warn(`[AUTH] Session Expired for: ${req.headers.authorization?.substring(0, 20)}...`);
+      // console.warn(`[AUTH] Session Expired for: ${req.headers.authorization?.substring(0, 20)}...`);
     } else {
-      console.error('Token Verification Failed:', error.message);
+      // console.error('Token Verification Failed:', error.message);
     }
     res.status(401).json({ error: 'Invalid or expired token.' });
   }
@@ -90,16 +90,16 @@ export const checkPermission = (moduleId: string, action: 'canRead' | 'canCreate
 
     // Fallback: If global authenticate didn't run or failed to attach, try to decode locally
     if (!user) {
-      console.warn(`[AUTH DEBUG] User missing in checkPermission for ${moduleId}. Attempting local decode...`);
+      // console.warn(`[AUTH DEBUG] User missing in checkPermission for ${moduleId}. Attempting local decode...`);
       const authHeader = req.headers.authorization;
       if (authHeader?.startsWith('Bearer ')) {
         try {
           const token = authHeader.split(' ')[1];
           user = jwt.verify(token, JWT_SECRET) as any;
           (req as any).user = user;
-          console.log(`[AUTH DEBUG] Local decode successful for ${user?.email}`);
+          // console.log(`[AUTH DEBUG] Local decode successful for ${user?.email}`);
         } catch (e) {
-          console.error(`[AUTH DEBUG] Local decode FAILED.`);
+          // console.error(`[AUTH DEBUG] Local decode FAILED.`);
         }
       }
     }

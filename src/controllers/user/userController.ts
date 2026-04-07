@@ -28,7 +28,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
   const modulePermsToSave = modulePermissions || module_permissions;
   const legacyPermsToSave = permissions || [];
   
-  console.log('BACKEND: createUser request data:', { name, email, role, assigned_area, permissionsCount: modulePermsToSave?.length });
+  // console.log('BACKEND: createUser request data:', { name, email, role, assigned_area, permissionsCount: modulePermsToSave?.length });
 
   try {
     const user = await prisma.user.create({
@@ -44,7 +44,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
         module_permissions: JSON.stringify(modulePermsToSave || [])
       }
     });
-    console.log('BACKEND: User created successfully:', user.id);
+    // console.log('BACKEND: User created successfully:', user.id);
     res.status(201).json({ 
       user: { 
         ...user, 
@@ -55,7 +55,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       }
     });
   } catch (error: any) {
-    console.error('BACKEND: Error creating user:', error);
+    // console.error('BACKEND: Error creating user:', error);
     res.status(500).json({ error: 'Failed to create user', detail: error.message });
   }
 };
@@ -82,7 +82,7 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
   const modulePermsToSave = modulePermissions || module_permissions;
   const legacyPermsToSave = permissions || [];
   
-  console.log('BACKEND: updateUser request data for ID:', id, { name, email, role, permissionsCount: modulePermsToSave?.length });
+  // console.log('BACKEND: updateUser request data for ID:', id, { name, email, role, permissionsCount: modulePermsToSave?.length });
 
   try {
     const dataToUpdate: any = {

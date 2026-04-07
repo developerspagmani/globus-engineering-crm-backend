@@ -22,7 +22,7 @@ const ALL_MODULES = [
 
 async function main() {
   const f1Id = '7cf46a0d-72b5-45a7-aeec-1bcb4e2fd838';
-  console.log('Activating all modules for F1 Systems:', f1Id);
+  // console.log('Activating all modules for F1 Systems:', f1Id);
   
   await prisma.company.update({
     where: { id: f1Id },
@@ -31,7 +31,7 @@ async function main() {
     }
   });
   
-  console.log('SUCCESS: All modules activated for F1 Systems.');
+  // console.log('SUCCESS: All modules activated for F1 Systems.');
 }
 
 main()

@@ -3,7 +3,7 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Seeding database with full module list and items...');
+  // console.log('🌱 Seeding database with full module list and items...');
 
   const allModules = [
     'mod_invoice', 'mod_customer', 'mod_inward', 'mod_outward', 
@@ -107,7 +107,7 @@ async function main() {
     }
   });
 
-  console.log('✅ Seeding completed.');
+  // console.log('✅ Seeding completed.');
 }
 
 main()
