@@ -7,26 +7,30 @@ import crypto from 'crypto';
 const JWT_SECRET = process.env.JWT_SECRET || 'globus_crm_secret_key_2024';
 
 export const login = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  const { email, password, company_id } = req.body;
   try {
-    const user = await prisma.user.findUnique({
-      where: { email },
+    // Determine the target company filter from the dropdown
+    const targetCompanyId = company_id === 'super_admin' ? null : company_id;
+
+    const user = await prisma.user.findFirst({
+      where: { 
+        email,
+        company_id: targetCompanyId // Explicitly checking the company link in the query
+      },
       include: {
         company: true
       }
     });
 
     if (!user || !user.password) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid Email or Password.' });
     }
 
     let isMatch = false;
     try {
-      // Check if it is a bcrypt hash
       if (user.password.startsWith('$2')) {
         isMatch = await bcrypt.compare(password, user.password);
       } else {
-        // Fallback for plain text legacy passwords
         isMatch = user.password === password;
       }
     } catch (e) {
@@ -56,9 +60,11 @@ export const login = async (req: Request, res: Response) => {
       user: { 
         ...user, 
         password: '',
+        company_id: user.company_id,
         assignedArea: (user as any).assigned_area,
         modulePermissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
-      } 
+      },
+      company: user.company 
     });
   } catch (error: any) {
     console.error('[LOGIN_ERROR]', error);
