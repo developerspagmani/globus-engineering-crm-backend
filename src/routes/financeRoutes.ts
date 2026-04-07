@@ -122,10 +122,10 @@ router.delete('/customers/:id', checkPermission('mod_customer', 'canDelete') as 
  *     responses:
  *       201: { description: Created }
  */
-router.get('/vendors', authorize(['super_admin']) as any, vendorController.getAllVendors);
-router.post('/vendors', authorize(['super_admin']) as any, vendorController.createVendor);
-router.put('/vendors/:id', authorize(['super_admin']) as any, vendorController.updateVendor);
-router.delete('/vendors/:id', authorize(['super_admin']) as any, vendorController.deleteVendor);
+router.get('/vendors', authorize(['super_admin', 'company_admin']) as any, vendorController.getAllVendors);
+router.post('/vendors', authorize(['super_admin', 'company_admin']) as any, vendorController.createVendor);
+router.put('/vendors/:id', authorize(['super_admin', 'company_admin']) as any, vendorController.updateVendor);
+router.delete('/vendors/:id', authorize(['super_admin', 'company_admin']) as any, vendorController.deleteVendor);
 
 /**
  * @openapi

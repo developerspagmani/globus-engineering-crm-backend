@@ -117,6 +117,33 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         }
       });
 
+      // Special Logic: If "Both", automatically create a Delivery Challan for "Without Process" items
+      if (billType === 'Both') {
+        const wopItems = items.filter((it: any) => it.wopQty > 0).map((it: any) => ({
+          ...it,
+          quantity: it.wopQty, // Map wopQty to quantity for the Challan
+          bill_type: 'without_process'
+        }));
+
+        if (wopItems.length > 0) {
+          await tx.challan.create({
+            data: {
+              id: crypto.randomUUID(),
+              challan_no: String(delNo || invNo),
+              party_id: String(customerId),
+              party_name: customerName,
+              party_type: 'customer',
+              company_id: finalCompanyId,
+              date: date ? new Date(date) : new Date(),
+              type: 'delivery',
+              status: 'COMPLETED',
+              items_json: JSON.stringify(wopItems),
+              vehicle_no: String(dc_no || dcNo || '').trim() || null
+            }
+          });
+        }
+      }
+
       if (inwardId) {
         await tx.inwardEntry.update({
           where: { id: String(inwardId) },
