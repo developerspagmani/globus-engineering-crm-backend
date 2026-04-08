@@ -23,7 +23,10 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
           partyId ? { party_id: String(partyId) } : {}
         ]
       },
-      orderBy: { created_at: 'desc' }
+      orderBy: [
+        { date: 'asc' },
+        { created_at: 'asc' }
+      ]
     });
     res.json(entries);
   } catch (error: any) {
@@ -32,7 +35,7 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
 };
 
 export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
-  const { partyId, partyName, partyType, date, type, amount, description, referenceId, companyId, company_id, linkedInvoiceId } = req.body;
+  const { partyId, partyName, partyType, date, type, amount, description, referenceId, vchType, vchNo, companyId, company_id, linkedInvoiceId } = req.body;
   const user = req.user;
   const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
@@ -40,6 +43,7 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
   try {
     const finalAmount = parseFloat(String(amount || '0'));
     const finalType = (type || 'credit').toLowerCase();
+    const isVendor = (partyType || 'customer').toLowerCase() === 'vendor';
     const entryDate = date || new Date();
 
     // 1. FIND THE PREVIOUS BALANCE
@@ -54,8 +58,15 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
     const lastBalance = lastEntry ? parseFloat(String((lastEntry as any).balance || '0')) : 0;
     
     // 2. CALCULATE NEW BALANCE
-    // Debit (+) adds to balance, Credit (-) subtracts from balance
-    const newBalance = finalType === 'debit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
+    // Professional Accounting Logic:
+    // Vendor (Liability): Balance = Old + Credit - Debit
+    // Customer (Asset): Balance = Old + Debit - Credit
+    let newBalance = lastBalance;
+    if (isVendor) {
+      newBalance = finalType === 'credit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
+    } else {
+      newBalance = finalType === 'debit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
+    }
 
     const entry = await prisma.$transaction(async (tx) => {
       const newEntry = await (tx as any).ledgerEntry.create({
@@ -66,6 +77,8 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
           party_type: partyType || 'customer',
           company_id: finalCompanyId ? String(finalCompanyId) : null,
           date: new Date(entryDate),
+          vch_type: vchType || '',
+          vch_no: vchNo || '',
           type: finalType,
           amount: finalAmount,
           balance: newBalance,

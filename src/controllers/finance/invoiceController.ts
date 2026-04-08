@@ -152,12 +152,12 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       }
 
       // 3. Update Ledger with running balance
-      const lastEntry = await tx.ledgerEntry.findFirst({
+      const lastEntry = await (tx.ledgerEntry as any).findFirst({
         where: {
-          party_id: String(customerId),
+          partyId: String(customerId),
           company_id: finalCompanyId ? String(finalCompanyId) : undefined
         },
-        orderBy: { created_at: 'desc' }
+        orderBy: { createdAt: 'desc' }
       });
 
       const lastBalance = (lastEntry as any)?.balance ?? 0;
@@ -166,19 +166,22 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       const amountAsFloat = parseFloat(rawGrandTotal);
       const newBalance = lastBalance + amountAsFloat;
 
-      await (tx as any).ledgerEntry.create({
+      const totalQty = items?.reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0) || 0;
+      await (tx.ledgerEntry as any).create({
         data: {
           id: crypto.randomUUID(),
-          party_id: String(customerId),
-          party_name: customerName,
-          party_type: 'customer',
+          partyId: String(customerId),
+          partyName: customerName,
+          partyType: 'customer',
           company_id: finalCompanyId ? String(finalCompanyId) : null,
           date: date ? new Date(date) : new Date(),
+          vchType: 'INVOICE',
+          vchNo: String(newInvoice.invoice_no || newInvoice.id),
           type: 'debit',
           amount: amountAsFloat,
           balance: newBalance,
-          description: `Invoice Generated: ${newInvoice.invoice_no || newInvoice.id}`,
-          reference_id: String(newInvoice.id)
+          description: `Invoice: ${newInvoice.invoice_no || newInvoice.id} (Qty: ${totalQty})`,
+          referenceNo: String(newInvoice.id)
         }
       });
 
