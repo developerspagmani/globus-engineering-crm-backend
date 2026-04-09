@@ -33,7 +33,11 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         invoices.filter((inv: any) => inv.inward_id === e.id).forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
             const matching = invItems.find((ii: any) => (ii.description || ii.item_name) === (item.description || item.item_name));
-            if (matching) totalDeducted += parseFloat(matching.quantity || matching.qty || '0');
+            if (matching) {
+                const q = parseFloat(matching.quantity || matching.qty || '0');
+                const w = parseFloat(matching.wopQty || matching.wop_qty || '0');
+                totalDeducted += (q + w);
+            }
         });
 
         // 2. Deduct from Outwards (Dispatches to Vendors)
@@ -194,7 +198,9 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => ii.item_name === item.item_name || ii.id === item.id || (ii.description === item.description));
           if (matchingItem) {
-            totalInvoicedQty += parseFloat(matchingItem.qty || matchingItem.quantity || '0');
+            const q = parseFloat(matchingItem.qty || matchingItem.quantity || '0');
+            const w = parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0');
+            totalInvoicedQty += (q + w);
           }
         });
 

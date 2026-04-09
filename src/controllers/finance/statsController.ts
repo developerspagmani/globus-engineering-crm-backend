@@ -106,6 +106,19 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
 
   } catch (error: any) {
     console.error('DASHBOARD STATS ERROR:', error);
-    res.status(500).json({ error: 'Failed to aggregate dashboard data', detail: error.message });
+    
+    // Handle Connection Failures (P1001) specifically for Hostinger Remote MySQL
+    if (error.code === 'P1001') {
+      return res.status(503).json({ 
+        error: 'Database Connection Error', 
+        detail: 'The backend cannot reach the Hostinger MySQL server. Please ensure your current IP is whitelisted in Hostinger Remote MySQL settings.',
+        host: 'srv1214.hstgr.io'
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'Failed to aggregate dashboard data', 
+      detail: error.message 
+    });
   }
 };

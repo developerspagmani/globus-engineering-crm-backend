@@ -112,7 +112,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
 
       // 3. UPDATE LEDGER (For both Customers and Vendors)
       if (party_id) {
-        const lastEntry = await tx.ledgerEntry.findFirst({
+        const lastEntry = await (tx.ledgerEntry as any).findFirst({
            where: {
              party_id: String(party_id),
              company_id: finalCompanyId ? String(finalCompanyId) : undefined
@@ -133,7 +133,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         const change = finalAmount;
         const newBalance = lastBalance - change; 
 
-        await tx.ledgerEntry.create({
+        await (tx.ledgerEntry as any).create({
           data: {
             id: crypto.randomUUID(),
             party_id: String(party_id),

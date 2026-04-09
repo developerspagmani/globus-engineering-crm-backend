@@ -148,15 +148,15 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
              where: { id: existingLedger.id },
              data: {
                 amount: jobValue,
-                vchNo: outward_no || String((entry as any).outward_no || ''),
+                vch_no: outward_no || String((entry as any).outward_no || ''),
                 description: `Job Work Dispatch: ${process_name || 'Processing'} (Qty: ${totalQty})`
              }
           });
        } else {
           // Create new ledger entry if missing
           const lastLedger = await (prisma.ledgerEntry as any).findFirst({
-             where: { partyId: String(vendor_id), company_id: finalCompanyId },
-             orderBy: { createdAt: 'desc' }
+             where: { party_id: String(vendor_id), company_id: finalCompanyId },
+             orderBy: { created_at: 'desc' }
           });
           const lastBalance = lastLedger ? (lastLedger.balance || 0) : 0;
           const newBalance = lastBalance - jobValue;
@@ -164,18 +164,18 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           await (prisma.ledgerEntry as any).create({
              data: {
                 id: crypto.randomUUID(),
-                partyId: String(vendor_id),
+                party_id: String(vendor_id),
                 partyName: vendor_name || 'N/A',
                 partyType: 'vendor',
                 company_id: finalCompanyId,
                 date: new Date(),
-                vchType: 'OUTWARD',
-                vchNo: outward_no || String((entry as any).outward_no || ''),
+                vch_type: 'OUTWARD',
+                vch_no: outward_no || String((entry as any).outward_no || ''),
                 type: 'debit',
                 amount: jobValue,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${process_name || 'Processing'} (Qty: ${totalQty})`,
-                referenceNo: entry.id
+                reference_id: entry.id
              }
           });
        }
