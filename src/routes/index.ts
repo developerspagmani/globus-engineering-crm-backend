@@ -8,6 +8,8 @@ import financeRoutes from './financeRoutes';
 import masterRoutes from './masterRoutes';
 import employeeRoutes from './employeeRoutes';
 import storeRoutes from './storeRoutes';
+import emailReminderRoutes from './emailReminderRoutes';
+
 import * as companyController from '../controllers/company/companyController';
 import * as gstController from '../controllers/finance/gstController';
 import { authenticate } from '../middleware/authMiddleware';
@@ -60,5 +62,7 @@ router.use('/', financeRoutes);    // Handles /invoices, /ledger, /challans, /vo
 router.use('/', masterRoutes);     // Handles /items, /processes, /price-fixings
 router.use('/', employeeRoutes);   // Handles /employees
 router.use('/stores', storeRoutes);      // Handles /stores, /stores/visit, etc.
+router.use('/', emailReminderRoutes);      // Handles email reminders
+
 
 export default router;
