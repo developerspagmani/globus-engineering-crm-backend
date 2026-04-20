@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import prisma from '../config/prisma';
 import nodemailer from 'nodemailer';
+import { generateInvoicePDF } from '../utils/pdfGenerator';
 
 
 // GET /api/invoices/:id/reminder-status - Get reminder status for an invoice
@@ -9,15 +10,15 @@ export const getReminderStatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { company_id } = req.query;
 
-    if (!company_id) {
-      return res.status(400).json({ error: 'Company ID is required' });
+    if (!company_id || typeof company_id !== 'string') {
+      return res.status(400).json({ error: 'Company ID is required and must be a string' });
     }
 
     // Check if reminder exists, otherwise return default (enabled: true)
     const reminder = await prisma.invoiceReminder.findUnique({
       where: {
         invoiceId_companyId: {
-          invoiceId: parseInt(id),
+          invoiceId: parseInt(id as string),
           companyId: company_id as string
         }
       }
@@ -36,16 +37,16 @@ export const updateReminderStatus = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { company_id, enabled } = req.body;
 
-    if (!company_id || typeof enabled !== 'boolean') {
+    if (!company_id || typeof company_id !== 'string' || typeof enabled !== 'boolean') {
       return res.status(400).json({ 
-        error: 'Company ID and enabled status are required' 
+        error: 'Company ID (string) and enabled status (boolean) are required' 
       });
     }
 
     const reminder = await prisma.invoiceReminder.upsert({
       where: {
         invoiceId_companyId: {
-          invoiceId: parseInt(id),
+          invoiceId: parseInt(id as string),
           companyId: company_id
         }
       },
@@ -54,8 +55,8 @@ export const updateReminderStatus = async (req: Request, res: Response) => {
         updatedAt: new Date()
       },
       create: {
-        invoiceId: parseInt(id),
-        companyId: company_id,
+        invoiceId: parseInt(id as string),
+        companyId: company_id as string,
         enabled,
         createdAt: new Date(),
         updatedAt: new Date()
@@ -78,160 +79,191 @@ export const processEmailReminders = async (req: Request, res: Response) => {
   try {
     const { company_id } = req.query;
     
-    // If company_id is provided, process only for that company. 
-    // If not, process for all companies (internal use).
-    
-    // Fetch enabled reminders
-    const whereClause: any = { enabled: true };
-    if (company_id) {
-      whereClause.companyId = company_id as string;
+    // 1. Fetch all invoices
+    const whereInvoice: any = {};
+    if (company_id && typeof company_id === 'string') {
+      whereInvoice.company_id = company_id;
     }
 
-    const enabledReminders = await prisma.invoiceReminder.findMany({
-      where: whereClause,
+    const invoices = await prisma.legacyInvoice.findMany({
+      where: whereInvoice,
       include: {
-        invoice: {
-          include: {
-            customer: true
-          }
-        }
+        reminders: true,
+        customer: true
       }
     });
 
-    let sentCount = 0;
-    let skippedCount = 0;
-    const results: any[] = [];
+    // 1.1 Fetch Inward Entry due dates for invoices that don't have one
+    const inwardIds = invoices
+      .filter(inv => !inv.due_date && inv.inward_id)
+      .map(inv => inv.inward_id as string);
+    
+    const inwards = await prisma.inwardEntry.findMany({
+      where: { id: { in: inwardIds } },
+      select: {
+        id: true,
+        due_date: true
+      }
+    });
+    
+    const inwardDueDateMap = new Map(inwards.map(i => [
+      i.id, 
+      (i as any).due_date
+    ]));
 
-    for (const reminder of enabledReminders) {
-      const invoice = (reminder as any).invoice;
-      if (!invoice || !invoice.dueDate) {
-        skippedCount++;
-        continue;
+    let sentCount = 0;
+    const results: any[] = [];
+    const processedInvoiceNos = new Set<string>();
+
+    for (const invoice of invoices) {
+      // 2. Determine the effective due date (Invoice date or Inward date)
+      let effectiveDueDate = invoice.due_date;
+      if (!effectiveDueDate && invoice.inward_id) {
+        effectiveDueDate = inwardDueDateMap.get(invoice.inward_id) || null;
       }
 
-      const reminderDates = calculateReminderDates(invoice.dueDate);
+      if (!effectiveDueDate || !invoice.invoice_no) continue;
+
+      // 3. Deduplicate: Skip if we already processed this invoice number in this run
+      const dupKey = `${invoice.invoice_no}_${invoice.customer_id}`;
+      if (processedInvoiceNos.has(dupKey)) continue;
+      processedInvoiceNos.add(dupKey);
+      
+      // 4. Check if reminders are explicitly disabled for this invoice
+      const reminderSetting = invoice.reminders.find(r => r.companyId === invoice.company_id);
+      if (reminderSetting && reminderSetting.enabled === false) {
+        continue; // Skip if manually disabled
+      }
+
+      const reminderDates = calculateReminderDates(effectiveDueDate);
+      if (!reminderDates) continue;
+
+      // 3. Loop through each scheduled reminder type
       for (const [reminderType, targetDate] of Object.entries(reminderDates)) {
-        // Handle urgent reminders (due within 10 days) - send immediately
-        if (reminderType === 'urgent' && targetDate && isToday(targetDate)) {
-          // Check if already sent today
-          const alreadyLog = await prisma.emailLog.findFirst({
+        if (!targetDate) continue;
+
+        const isUrgent = reminderType === 'urgent';
+        const isScheduledForToday = isToday(targetDate);
+        const isPastDue = targetDate < new Date() && !isToday(targetDate);
+
+        if (isScheduledForToday) {
+          // 4. Check if we already sent THIS specific milestone ever
+          const milestoneAlreadySent = await prisma.emailLog.findFirst({
             where: {
-              invoiceId: reminder.invoiceId,
-              reminderType: 'urgent',
+              invoiceId: invoice.id,
+              reminderType: reminderType
+            }
+          });
+
+          if (milestoneAlreadySent) continue;
+
+          // 5. Check if we already sent ANY reminder for this invoice TODAY
+          // (To prevent sending 'today' and 'urgent' on the same day)
+          const anySentToday = await prisma.emailLog.findFirst({
+            where: {
+              invoiceId: invoice.id,
               createdAt: {
                 gte: new Date(new Date().setHours(0, 0, 0, 0))
               }
             }
           });
-          if (alreadyLog) continue;
-          
-          console.log(`📧 Sending urgent ${reminderType} reminder for invoice ${reminder.invoiceId}`);
+
+          if (anySentToday) continue;
+
+          console.log(`📧 Sending ${reminderType} reminder for invoice ${invoice.invoice_no}`);
           
           const emailContent = generateEmailContent(invoice);
-          const customerEmail = `${invoice.customerName?.toLowerCase().replace(/\s+/g, '.')}@example.com`;
           
+          // Get reach email from customer record
+          const customerEmail = invoice.customer?.email_id1 || 
+                               invoice.customer?.email_id2 || 
+                               invoice.customer?.email || 
+                               (invoice.customer_name ? `${invoice.customer_name.toLowerCase().replace(/\s+/g, '.')}@gmail.com` : null);
+          
+          if (!customerEmail) continue;
+          
+          const pdfBuffer = await generateInvoicePDF({
+            invoiceNumber: invoice.invoice_no?.toString() || 'N/A',
+            invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : 'N/A',
+            dcNo: invoice.dc_no || 'N/A',
+            dcDate: invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A',
+            poNo: invoice.po_no || 'N/A',
+            poDate: invoice.po_date ? new Date(invoice.po_date).toLocaleDateString() : 'N/A',
+            customerName: invoice.customer_name || 'N/A',
+            customerAddress: invoice.address || invoice.customer?.street1 || 'N/A',
+            customerGst: invoice.customer?.gst || 'N/A',
+            items: JSON.parse(invoice.items_json || '[]').map((it: any) => ({
+              description: it.description || 'N/A',
+              quantity: it.quantity || 0,
+              price: it.unitPrice || 0,
+              amount: it.total || 0
+            })),
+            subTotal: parseFloat(invoice.total || '0'),
+            taxTotal: parseFloat(invoice.tax_total || '0'),
+            grandTotal: parseFloat(invoice.grand_total || '0'),
+            companyName: 'Globus Engineering Tools',
+            companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
+            companyGst: '33AAIFG6568K1ZZ',
+            bankDetails: {
+              bankName: 'INDIAN OVERSEAS BANK',
+              accNo: '170902000000962',
+              ifsc: 'IOBA0001709'
+            }
+          });
+
           const success = await sendEmail(
             customerEmail,
             emailContent.subject,
-            emailContent.body
+            emailContent.body,
+            [
+              {
+                filename: `Invoice_${invoice.invoice_no}.pdf`,
+                content: pdfBuffer
+              }
+            ]
           );
 
           if (success) {
             sentCount++;
-            results.push({
-              invoiceId: reminder.invoiceId,
-              reminderType,
-              status: 'sent',
-              timestamp: new Date().toISOString(),
-              customerEmail,
-            });
-          } else {
-            failedCount++;
-            results.push({
-              invoiceId: reminder.invoiceId,
-              reminderType,
-              status: 'failed',
-              timestamp: new Date().toISOString(),
-              customerEmail,
-              error: 'Email service unavailable',
-            });
-          }
-        } else if (targetDate && isToday(targetDate)) {
-          // Send all 4 emails immediately if due date is within 10 days
-          console.log(`🚨 Due date within 10 days - sending all 4 emails immediately for invoice ${reminder.invoiceId}`);
-          
-          for (const [emailType, emailDate] of Object.entries(reminderDates)) {
-            if (emailType === 'urgent') continue; // Skip urgent, already handled
-            
-            const alreadyLog = await prisma.emailLog.findFirst({
-              where: {
-                invoiceId: reminder.invoiceId,
-                reminderType: emailType,
-                createdAt: {
-                  gte: new Date(new Date().setHours(0, 0, 0, 0))
-                }
+            await prisma.emailLog.create({
+              data: {
+                invoiceId: invoice.id,
+                customerId: invoice.customer_id || 0,
+                reminderType: reminderType,
+                emailSent: new Date(),
+                recipientEmail: customerEmail,
+                status: 'sent'
               }
             });
-            
-            if (alreadyLog) continue;
-            
-            console.log(`📧 Sending immediate ${emailType} reminder for invoice ${reminder.invoiceId}`);
-            
-            const emailContent = generateEmailContent(invoice);
-            const customerEmail = `${invoice.customerName?.toLowerCase().replace(/\s+/g, '.')}@example.com`;
-            
-            const success = await sendEmail(
-              customerEmail,
-              emailContent.subject,
-              emailContent.body
-            );
 
-            if (success) {
-              sentCount++;
-              results.push({
-                invoiceId: reminder.invoiceId,
-                reminderType: emailType,
-                status: 'sent',
-                timestamp: new Date().toISOString(),
-                customerEmail,
-              });
-            } else {
-              failedCount++;
-              results.push({
-                invoiceId: reminder.invoiceId,
-                reminderType: emailType,
-                status: 'failed',
-                timestamp: new Date().toISOString(),
-                customerEmail,
-                error: 'Email service unavailable',
-              });
-            }
+            results.push({
+              invoiceId: invoice.id,
+              type: reminderType,
+              status: 'sent'
+            });
           }
-        } else if (targetDate && isToday(targetDate)) {
-          results.push({ invoiceId: reminder.invoiceId, type: reminderType, success: true });
         }
       }
     }
 
     res.json({
       success: true,
-      sent: sentCount,
-      skipped: skippedCount,
-      results
+      totalSent: sentCount,
+      details: results
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error processing reminders:', error);
-    res.status(500).json({ error: 'Failed to process reminders' });
+    res.status(500).json({ error: 'Failed to process reminders', detail: error.message });
   }
 };
 
-function calculateReminderDates(dueDate: string): {
+function calculateReminderDates(dueDate: Date): {
   '30_days': Date;
   '1_week': Date;
   '1_day': Date;
   'today': Date;
   urgent: Date | null;
-} {
+} | null {
   if (!dueDate) return null;
   
   const due = new Date(dueDate);
@@ -266,6 +298,8 @@ Delivery Details:
 - DC No: ${invoice.dc_no || 'N/A'}
 - DC Date: ${invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A'}
 
+Please find the attached invoice #${invoice.invoice_no} for your reference. 
+
 Please ensure payment is made at your earliest convenience. If you have already paid, please ignore this email.
 
 Best regards,
@@ -274,7 +308,7 @@ Globus Engineering Team
   };
 }
 
-async function sendEmail(to: string, subject: string, body: string): Promise<boolean> {
+async function sendEmail(to: string, subject: string, body: string, attachments?: any[]): Promise<boolean> {
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || '587'),
@@ -291,6 +325,7 @@ async function sendEmail(to: string, subject: string, body: string): Promise<boo
       to,
       subject,
       text: body,
+      attachments
     });
     return true;
   } catch (error) {
@@ -299,3 +334,78 @@ async function sendEmail(to: string, subject: string, body: string): Promise<boo
   }
 }
 
+
+export const sendTestEmail8840 = async (req: Request, res: Response) => {
+  try {
+    console.log('🚀 Starting test email for 8840...');
+    const invoice = await prisma.legacyInvoice.findFirst({
+      where: { invoice_no: 8840 },
+      include: { customer: true }
+    });
+
+    if (!invoice) {
+        console.log('❌ Invoice 8840 not found');
+        return res.status(404).json({ error: 'Invoice 8840 not found' });
+    }
+    console.log('✅ Found invoice 8840');
+
+    const customerEmail = invoice.customer?.email_id1 || 
+                         invoice.customer?.email_id2 || 
+                         invoice.customer?.email || 
+                         'rdhanushkumarramalingam@gmail.com';
+
+    console.log(`📧 Recipient: ${customerEmail}`);
+    const emailContent = generateEmailContent(invoice);
+    
+    console.log('📄 Generating PDF...');
+    const pdfBuffer = await generateInvoicePDF({
+      invoiceNumber: invoice.invoice_no?.toString() || 'N/A',
+      invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : 'N/A',
+      dcNo: invoice.dc_no || 'N/A',
+      dcDate: invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A',
+      poNo: invoice.po_no || 'N/A',
+      poDate: invoice.po_date ? new Date(invoice.po_date).toLocaleDateString() : 'N/A',
+      customerName: invoice.customer_name || 'N/A',
+      customerAddress: invoice.address || invoice.customer?.street1 || 'N/A',
+      customerGst: invoice.customer?.gst || 'N/A',
+      items: JSON.parse(invoice.items_json || '[]').map((it: any) => ({
+        description: it.description || 'N/A',
+        quantity: it.quantity || 0,
+        price: it.unitPrice || 0,
+        amount: it.total || 0,
+        hsn: it.hsn || '84661010'
+      })),
+      subTotal: parseFloat(invoice.total || '0'),
+      taxTotal: parseFloat(invoice.tax_total || '0'),
+      grandTotal: parseFloat(invoice.grand_total || '0'),
+      companyName: 'Globus Engineering Tools',
+      companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
+      companyGst: '33AAIFG6568K1ZZ',
+      bankDetails: {
+        bankName: 'INDIAN OVERSEAS BANK',
+        accNo: '170902000000962',
+        ifsc: 'IOBA0001709'
+      }
+    });
+    console.log('✅ PDF Generated');
+
+    console.log('📨 Sending Email via SMTP...');
+    const success = await sendEmail(
+      customerEmail,
+      `[SAMPLE] ${emailContent.subject}`,
+      emailContent.body,
+      [
+        {
+          filename: `Invoice_${invoice.invoice_no}.pdf`,
+          content: pdfBuffer
+        }
+      ]
+    );
+
+    console.log(`🏁 Result: ${success ? 'SUCCESS' : 'FAILURE'}`);
+    res.json({ success, message: `Sample email for 8840 sent to ${customerEmail}` });
+  } catch (error: any) {
+    console.error('💥 Error in test email:', error);
+    res.status(500).json({ error: error.message });
+  }
+};

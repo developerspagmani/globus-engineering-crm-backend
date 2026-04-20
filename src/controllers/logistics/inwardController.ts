@@ -27,7 +27,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const { 
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name, 
-    po_reference, po_date, challan_no, dc_no, dc_date, vehicle_no, status, items, company_id, companyId 
+    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items, company_id, companyId 
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
@@ -51,6 +51,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
         company_id: String(finalCompanyId || ''),
         status: status || 'pending',
         items_json: JSON.stringify(items || []),
+        due_date: due_date ? new Date(due_date) : null,
         date: new Date()
       }
     });
@@ -68,7 +69,7 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { 
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name, 
-    po_reference, po_date, challan_no, dc_no, dc_date, vehicle_no, status, items 
+    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items 
   } = req.body;
 
   try {
@@ -88,6 +89,7 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
         dc_date: dc_date ? new Date(dc_date) : undefined,
         vehicle_no,
         status,
+        due_date: due_date ? new Date(due_date) : undefined,
         items_json: items ? JSON.stringify(items) : undefined,
       }
     });
@@ -177,6 +179,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         po_date: entry.po_date,
         dc_no: entry.dc_no,
         dc_date: entry.dc_date,
+        due_date: entry.due_date,
         status: entry.status,
         items: balanceItems,
         hasBalance

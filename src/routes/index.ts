@@ -48,6 +48,9 @@ router.get('/companies', companyController.getAllCompanies);
 // Public lookups
 router.get('/gst-lookup', gstController.getGstDetails);
 
+// Email Reminders (Publicly accessible for cron job/manual trigger)
+router.use('/', emailReminderRoutes);
+
 // ==========================================
 // Protected Routes (Require Bearer Token)
 // ==========================================
@@ -62,7 +65,6 @@ router.use('/', financeRoutes);    // Handles /invoices, /ledger, /challans, /vo
 router.use('/', masterRoutes);     // Handles /items, /processes, /price-fixings
 router.use('/', employeeRoutes);   // Handles /employees
 router.use('/stores', storeRoutes);      // Handles /stores, /stores/visit, etc.
-router.use('/', emailReminderRoutes);      // Handles email reminders
 
 
 export default router;

@@ -17,8 +17,8 @@ class EmailReminderService {
   public startCronJob() {
     if (this.isRunning) return;
     
-    // Run every day at 9:00 AM
-    cron.schedule('0 9 * * *', async () => {
+    // Run every day at 12:40 PM
+    cron.schedule('40 12 * * *', async () => {
       console.log('⏰ Running scheduled email reminder check...');
       try {
         // We can call the controller logic directly or via an internal request
@@ -32,7 +32,7 @@ class EmailReminderService {
     });
 
     this.isRunning = true;
-    console.log('🚀 Email reminder cron job started (Daily at 9:00 AM)');
+    console.log('🚀 Email reminder cron job started (Daily at 12:40 PM)');
   }
 }
 
