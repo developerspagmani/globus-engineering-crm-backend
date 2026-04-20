@@ -51,7 +51,8 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     };
 
     // --- Outer Border ---
-    doc.rect(leftX, 40, width, 750).stroke();
+    // Top border only here. Left, right, and bottom borders drawn at the very end to dynamically wrap content!
+    doc.moveTo(leftX, 40).lineTo(rightX, 40).stroke();
 
     // --- Top Header Section ---
     // Left Octagon Logo
@@ -162,7 +163,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     drawRowLine(y);
 
     // Table Column Vertical Lines
-    const tableBottom = 500;
+    const tableBottom = 480;
     const drawColLines = () => {
       doc.moveTo(leftX + 35, y - 18).lineTo(leftX + 35, tableBottom).stroke();
       doc.moveTo(leftX + 265, y - 18).lineTo(leftX + 265, tableBottom).stroke();
@@ -245,16 +246,23 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     drawRowLine(y);
 
     // --- Declaration Footer ---
-    doc.fontSize(7).font('Helvetica-Bold').text('Declaration:', leftX + 5, y + 5, { continued: true });
+    doc.fontSize(7).font('Helvetica-Bold').text('Declaration: ', leftX + 5, y + 5, { continued: true });
     doc.font('Helvetica').text('Supplied to Special Economic Zone-Duties & Taxes Are Exempted');
-    doc.text('(Folio-No.8/3/2007 Suzlon ON INFRA SEZ DT.24.9.2007)');
-    doc.text('UNDER EPCG LICENCE NO');
-    doc.moveDown(1);
-    doc.text('"Supply Meant For export/supply yo SEZ Unit or Sez developer for authorised', { align: 'center' });
-    doc.text('Operations under Bond or Letter of Undertaking without Payment of Integrated Tax"', { align: 'center' });
-    doc.text('(Export Covered Under LUT NO AD330625078562X v Dated 25/06/2025)', { align: 'center' });
-    doc.moveDown(1);
-    doc.text('Declartion: We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct');
+    doc.text('(Folio-No.8/3/2007 Suzlon ON INFRA SEZ DT.24.9.2007)', leftX + 5, doc.y);
+    doc.text('UNDER EPCG LICENCE NO', leftX + 5, doc.y);
+    doc.moveDown(0.5);
+    doc.text('"Supply Meant For export/supply to SEZ Unit or Sez developer for authorised', { align: 'center', width: width - 10 });
+    doc.text('Operations under Bond or Letter of Undertaking without Payment of Integrated Tax"', { align: 'center', width: width - 10 });
+    doc.text('(Export Covered Under LUT NO AD330625078562X v Dated 25/06/2025)', { align: 'center', width: width - 10 });
+    doc.moveDown(0.5);
+    doc.text('Declaration: We declare that this invoice shows the actual price of the goods described and that all particulars are true and correct', { width: width - 10 });
+
+    const finalY = doc.y + 10;
+
+    // Draw Left, Right, Bottom Borders
+    doc.moveTo(leftX, 40).lineTo(leftX, finalY).stroke();
+    doc.moveTo(rightX, 40).lineTo(rightX, finalY).stroke();
+    doc.moveTo(leftX, finalY).lineTo(rightX, finalY).stroke();
 
     doc.end();
   });
