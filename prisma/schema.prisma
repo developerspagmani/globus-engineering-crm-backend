@@ -126,15 +126,18 @@ model LegacyInvoice {
 }
 
 model Company {
-  id             String  @id @db.VarChar(50)
-  name           String  @db.VarChar(255)
-  slug           String  @db.VarChar(100)
-  plan           String  @db.VarChar(50)
-  active_modules String? @db.Text
-  users          User[]
-  leads          Lead[]
-  deals          Deal[]
-  reminders      InvoiceReminder[]
+  id               String            @id @db.VarChar(50)
+  name             String            @db.VarChar(255)
+  slug             String            @db.VarChar(100)
+  plan             String            @db.VarChar(50)
+  active_modules   String?           @db.Text
+  logo             String?           @db.LongText
+  logo_secondary   String?           @db.LongText
+  invoice_settings String?           @db.LongText
+  users            User[]
+  leads            Lead[]
+  deals            Deal[]
+  reminders        InvoiceReminder[]
 
   @@map("app_companies")
 }
