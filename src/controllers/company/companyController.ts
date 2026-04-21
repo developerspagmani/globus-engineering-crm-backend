@@ -62,8 +62,9 @@ export const updateCompany = async (req: Request, res: Response) => {
     });
     res.json({
         ...company,
-        activeModules: activeModules || [],
-        invoiceSettings: invoiceSettings || null
+        activeModules: activeModules || JSON.parse(company.active_modules || '[]'),
+        logoSecondary: company.logo_secondary,
+        invoiceSettings: invoiceSettings || (company.invoice_settings ? JSON.parse(company.invoice_settings) : null)
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update company', detail: error.message });
