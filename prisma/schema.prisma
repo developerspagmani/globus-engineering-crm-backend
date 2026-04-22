@@ -114,6 +114,7 @@ model LegacyInvoice {
   items_json     String?           @db.Text
   sub_total      Float?
   tax_total      Float?
+  tax_rate       Float?            @default(12)
   inward_id      String?           @db.VarChar(50)
   notes          String?           @db.Text
   gstin          String?           @db.VarChar(15)
@@ -312,6 +313,12 @@ model OutwardEntry {
   inward_id         String?   @db.VarChar(50)
   inward_no         String?   @db.VarChar(50)
   party_type        String?   @db.VarChar(50)
+  vendor_id         String?   @db.VarChar(50)
+  vendor_name       String?   @db.VarChar(255)
+  process_name      String?   @db.VarChar(100)
+  driver_name       String?   @db.VarChar(100)
+  notes             String?   @db.Text
+  amount            Float?
 
   @@map("app_outward_entries")
 }
@@ -329,6 +336,7 @@ model LedgerEntry {
   description  String?   @db.Text
   reference_id String?   @db.VarChar(100)
   vch_type     String?   @db.VarChar(50)
+  vch_no       String?   @db.VarChar(50)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
 
   @@map("app_ledger_entries")

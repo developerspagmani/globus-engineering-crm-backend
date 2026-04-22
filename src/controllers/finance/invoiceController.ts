@@ -48,7 +48,15 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         discount: parseFloat(inv.discount || '0'),
         gstin: inv.gstin || '',
         state: inv.state || '',
-        status: inv.status || 'DRAFT'
+        status: inv.status || 'DRAFT',
+        taxTotal: inv.tax_total,
+        taxRate: inv.tax_rate,
+        gst1: inv.gst1,
+        gst2: inv.gst2,
+        igst: inv.igst,
+        gst1_per: inv.gst1_per,
+        gst2_per: inv.gst2_per,
+        igst_per: inv.igst_per
       };
       return mapped;
     });
@@ -63,8 +71,16 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
   const {
     invoiceNumber, date, dueDate, customerId, customerName,
     address, subTotal, grandTotal, items, billType, inwardId, company_id, companyId, notes,
-    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state
+    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate
   } = req.body;
+
+  const finalTaxRate = parseFloat(String(tax_rate || taxRate || '12'));
+  const finalSubTotal = parseFloat(String(subTotal || '0'));
+  const finalGrandTotal = parseFloat(String(grandTotal || '0'));
+  const finalTaxTotal = finalGrandTotal - finalSubTotal;
+  
+  const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+
   const user = req.user;
   const rawCompanyId = user?.company_id || company_id || companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
@@ -113,7 +129,15 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
           status: 'BILLED',
           gstin: gstin || null,
           state: state || null,
-          notes: notes || ''
+          notes: notes || '',
+          tax_total: finalTaxTotal,
+          tax_rate: finalTaxRate,
+          gst1: isIntraState ? String(finalTaxTotal / 2) : null,
+          gst2: isIntraState ? String(finalTaxTotal / 2) : null,
+          igst: !isIntraState ? String(finalTaxTotal) : null,
+          gst1_per: isIntraState ? String(finalTaxRate / 2) : null,
+          gst2_per: isIntraState ? String(finalTaxRate / 2) : null,
+          igst_per: !isIntraState ? String(finalTaxRate) : null,
         }
       });
 
@@ -206,8 +230,30 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
     date, dueDate, customerId, customerName,
-    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state
+    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state, tax_rate, taxRate
   } = req.body;
+
+  const finalTaxRate = tax_rate || taxRate ? parseFloat(String(tax_rate || taxRate)) : undefined;
+  const finalSubTotal = subTotal ? parseFloat(String(subTotal)) : undefined;
+  const finalGrandTotal = grandTotal ? parseFloat(String(grandTotal)) : undefined;
+  
+  let taxUpdate: any = {};
+  if (finalGrandTotal !== undefined && finalSubTotal !== undefined) {
+    const finalTaxTotal = finalGrandTotal - finalSubTotal;
+    const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+    const currentRate = finalTaxRate || 12;
+
+    taxUpdate = {
+      tax_total: finalTaxTotal,
+      tax_rate: finalTaxRate,
+      gst1: isIntraState ? String(finalTaxTotal / 2) : null,
+      gst2: isIntraState ? String(finalTaxTotal / 2) : null,
+      igst: !isIntraState ? String(finalTaxTotal) : null,
+      gst1_per: isIntraState ? String(currentRate / 2) : null,
+      gst2_per: isIntraState ? String(currentRate / 2) : null,
+      igst_per: !isIntraState ? String(currentRate) : null,
+    };
+  }
 
   try {
     const invoice = await (prisma as any).legacyInvoice.update({
@@ -232,7 +278,8 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
         status: status?.toUpperCase(),
         gstin: gstin,
         state: state,
-        notes: notes
+        notes: notes,
+        ...taxUpdate
       }
     });
 
