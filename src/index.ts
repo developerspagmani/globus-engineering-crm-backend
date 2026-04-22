@@ -5,6 +5,8 @@ import apiRoutes from './routes';
 import prisma from './config/prisma';
 import swaggerUi from 'swagger-ui-express';
 import swaggerSpec from './config/swagger';
+import EmailReminderService from './services/emailReminderService';
+
 
 dotenv.config();
 
@@ -53,7 +55,12 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
 if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
   app.listen(PORT, () => {
     console.log(`🚀 MVC Backend running on http://localhost:${PORT}`);
+    
+    // Start email reminder cron job
+    const emailService = EmailReminderService.getInstance();
+    emailService.startCronJob();
   });
 }
+
 
 export default app;

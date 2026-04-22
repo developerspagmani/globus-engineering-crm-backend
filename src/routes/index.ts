@@ -8,6 +8,8 @@ import financeRoutes from './financeRoutes';
 import masterRoutes from './masterRoutes';
 import employeeRoutes from './employeeRoutes';
 import storeRoutes from './storeRoutes';
+import emailReminderRoutes from './emailReminderRoutes';
+
 import * as companyController from '../controllers/company/companyController';
 import * as gstController from '../controllers/finance/gstController';
 import { authenticate } from '../middleware/authMiddleware';
@@ -46,6 +48,9 @@ router.get('/companies', companyController.getAllCompanies);
 // Public lookups
 router.get('/gst-lookup', gstController.getGstDetails);
 
+// Email Reminders (Publicly accessible for cron job/manual trigger)
+router.use('/', emailReminderRoutes);
+
 // ==========================================
 // Protected Routes (Require Bearer Token)
 // ==========================================
@@ -60,5 +65,6 @@ router.use('/', financeRoutes);    // Handles /invoices, /ledger, /challans, /vo
 router.use('/', masterRoutes);     // Handles /items, /processes, /price-fixings
 router.use('/', employeeRoutes);   // Handles /employees
 router.use('/stores', storeRoutes);      // Handles /stores, /stores/visit, etc.
+
 
 export default router;

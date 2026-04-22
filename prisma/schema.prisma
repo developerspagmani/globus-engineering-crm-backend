@@ -3,9 +3,11 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider     = "mysql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
 }
+
 
 model LegacyCustomer {
   id              Int       @id @default(autoincrement())
@@ -47,6 +49,8 @@ model LegacyCustomer {
   company_id      String?   @db.VarChar(50)
   app_created_at  DateTime? @default(now()) @db.Timestamp(0)
   district        String?   @db.VarChar(100)
+  emailLogs       EmailLog[]
+  invoices        LegacyInvoice[]
 
   @@map("tbl_customer")
 }
@@ -76,125 +80,135 @@ model LegacyEmployee {
 }
 
 model LegacyInvoice {
-  id             Int       @id @default(autoincrement())
-  invoice_date   DateTime? @db.Date
+  id             Int               @id @default(autoincrement())
+  invoice_date   DateTime?         @db.Date
   inward_no      Int?
-  dc_no          String?   @db.VarChar(200)
-  dc_date        DateTime? @db.Date
-  po_no          String?   @db.VarChar(250)
-  po_date        DateTime? @db.Date
+  dc_no          String?           @db.VarChar(200)
+  dc_date        DateTime?         @db.Date
+  po_no          String?           @db.VarChar(250)
+  po_date        DateTime?         @db.Date
   customer_id    Int?
-  total          String?   @db.VarChar(250)
-  discount       String?   @db.VarChar(250)
+  total          String?           @db.VarChar(250)
+  discount       String?           @db.VarChar(250)
   other_charges  Float?
-  gst1           String?   @db.VarChar(250)
-  gst2           String?   @db.VarChar(250)
-  igst           String?   @db.VarChar(250)
-  gst1_per       String?   @db.VarChar(250)
-  gst2_per       String?   @db.VarChar(250)
-  igst_per       String?   @db.VarChar(250)
-  state_det      String?   @db.VarChar(250)
-  grand_total    String?   @db.VarChar(250)
-  paid_amount    String?   @db.VarChar(250)
-  voucher_date   DateTime? @db.Date
-  cheque_no      String?   @db.VarChar(250)
-  status         String?   @default("BILLED") @db.VarChar(30)
+  gst1           String?           @db.VarChar(250)
+  gst2           String?           @db.VarChar(250)
+  igst           String?           @db.VarChar(250)
+  gst1_per       String?           @db.VarChar(250)
+  gst2_per       String?           @db.VarChar(250)
+  igst_per       String?           @db.VarChar(250)
+  state_det      String?           @db.VarChar(250)
+  grand_total    String?           @db.VarChar(250)
+  paid_amount    String?           @db.VarChar(250)
+  voucher_date   DateTime?         @db.Date
+  cheque_no      String?           @db.VarChar(250)
+  status         String?           @default("BILLED") @db.VarChar(30)
   invoice_no     Int?
   delivery_no    Int?
-  bill_type      String?   @db.VarChar(50)
-  company_id     String?   @db.VarChar(50)
-  app_created_at DateTime? @default(now()) @db.Timestamp(0)
-  address        String?   @db.Text
-  customer_name  String?   @db.VarChar(255)
-  due_date       DateTime? @db.Date
-  items_json     String?   @db.Text
+  bill_type      String?           @db.VarChar(50)
+  company_id     String?           @db.VarChar(50)
+  app_created_at DateTime?         @default(now()) @db.Timestamp(0)
+  address        String?           @db.Text
+  customer_name  String?           @db.VarChar(255)
+  due_date       DateTime?         @db.Date
+  items_json     String?           @db.Text
   sub_total      Float?
   tax_total      Float?
-  inward_id      String?   @db.VarChar(50)
-  gstin          String?   @db.VarChar(15)
-  state          String?   @db.VarChar(100)
-  notes          String?   @db.Text
+  inward_id      String?           @db.VarChar(50)
+  notes          String?           @db.Text
+  gstin          String?           @db.VarChar(15)
+  state          String?           @db.VarChar(100)
+  reminders      InvoiceReminder[]
+  emailLogs      EmailLog[]
+  customer       LegacyCustomer? @relation(fields: [customer_id], references: [id])
 
   @@map("tbl_invoice")
 }
 
 model Company {
-  id             String  @id @db.VarChar(50)
-  name           String  @db.VarChar(255)
-  slug           String  @db.VarChar(100)
-  plan           String  @db.VarChar(50)
-  active_modules String? @db.Text
-  users          User[]
-  leads          Lead[]
-  deals          Deal[]
+  id               String            @id @db.VarChar(50)
+  name             String            @db.VarChar(255)
+  slug             String            @db.VarChar(100)
+  plan             String            @db.VarChar(50)
+  active_modules   String?           @db.Text
+  logo             String?           @db.LongText
+  logo_secondary   String?           @db.LongText
+  invoice_settings String?           @db.LongText
+  users            User[]
+  leads            Lead[]
+  deals            Deal[]
+  reminders        InvoiceReminder[]
 
   @@map("app_companies")
 }
 
 model User {
-  id                 String  @id @db.VarChar(50)
-  name               String  @db.VarChar(255)
-  email              String  @unique(map: "email") @db.VarChar(255)
-  password           String  @db.VarChar(255)
-  phone              String? @db.VarChar(50)
-  role               String  @db.VarChar(50)
-  company_id         String? @db.VarChar(50)
-  assigned_area      String? @db.VarChar(100)
-  permissions        String? @db.Text
-  module_permissions String? @db.Text
+  id                 String   @id @db.VarChar(50)
+  name               String   @db.VarChar(255)
+  email              String   @unique(map: "email") @db.VarChar(255)
+  password           String   @db.VarChar(255)
+  role               String   @db.VarChar(50)
+  company_id         String?  @db.VarChar(50)
+  permissions        String?  @db.Text
+  module_permissions String?  @db.Text
+  phone              String?  @db.VarChar(50)
+  assigned_area      String?  @db.VarChar(100)
   company            Company? @relation(fields: [company_id], references: [id])
 
+  @@index([company_id], map: "app_users_company_id_fkey")
   @@map("app_users")
 }
 
 model Lead {
-  id                 String    @id @db.VarChar(50)
-  name               String    @db.VarChar(255)
-  email              String?   @db.VarChar(255)
-  phone              String?   @db.VarChar(50)
-  company            String?   @db.VarChar(255)
-  industry           String?   @db.VarChar(100)
-  source             String?   @db.VarChar(100)
-  status             String?   @db.VarChar(50)
-  agent_id           String?   @db.VarChar(50)
-  company_id         String?   @db.VarChar(50)
-  assigned_area      String?   @db.VarChar(100)
-  notes              String?   @db.Text
-  product_interest   String?   @db.Text
-  next_visit_date    DateTime? @db.Date
-  created_at         DateTime? @default(now()) @db.Timestamp(0)
-  company_rel        Company? @relation(fields: [company_id], references: [id])
+  id               String    @id @db.VarChar(50)
+  name             String    @db.VarChar(255)
+  email            String?   @db.VarChar(255)
+  phone            String?   @db.VarChar(50)
+  company          String?   @db.VarChar(255)
+  industry         String?   @db.VarChar(100)
+  source           String?   @db.VarChar(100)
+  status           String?   @db.VarChar(50)
+  agent_id         String?   @db.VarChar(50)
+  company_id       String?   @db.VarChar(50)
+  created_at       DateTime? @default(now()) @db.Timestamp(0)
+  assigned_area    String?   @db.VarChar(100)
+  next_visit_date  DateTime? @db.Date
+  notes            String?   @db.Text
+  product_interest String?   @db.Text
+  company_rel      Company?  @relation(fields: [company_id], references: [id])
 
+  @@index([company_id], map: "app_leads_company_id_fkey")
   @@map("app_leads")
 }
 
 model Store {
-  id                String      @id @db.VarChar(50)
-  name              String      @db.VarChar(255)
-  owner_name        String?     @db.VarChar(255)
-  phone             String?     @db.VarChar(50)
-  address           String?     @db.Text
-  area              String?     @db.VarChar(100)
-  city              String?     @db.VarChar(100)
-  assigned_agent_id String?     @db.VarChar(50)
-  company_id        String?     @db.VarChar(50)
-  created_at        DateTime?   @default(now()) @db.Timestamp(0)
+  id                String       @id @db.VarChar(50)
+  name              String       @db.VarChar(255)
+  owner_name        String?      @db.VarChar(255)
+  phone             String?      @db.VarChar(50)
+  address           String?      @db.Text
+  area              String?      @db.VarChar(100)
+  city              String?      @db.VarChar(100)
+  assigned_agent_id String?      @db.VarChar(50)
+  company_id        String?      @db.VarChar(50)
+  created_at        DateTime?    @default(now()) @db.Timestamp(0)
   visits            StoreVisit[]
 
   @@map("app_stores")
 }
 
 model StoreVisit {
-  id                String    @id @db.VarChar(50)
-  store_id          String    @db.VarChar(50)
-  agent_id          String    @db.VarChar(50)
-  visit_date        DateTime  @db.Date
-  notes             String?   @db.Text
-  product_interest  String?   @db.Text
-  next_visit_date   DateTime? @db.Date
-  created_at        DateTime? @default(now()) @db.Timestamp(0)
-  store             Store     @relation(fields: [store_id], references: [id])
+  id               String    @id @db.VarChar(50)
+  store_id         String    @db.VarChar(50)
+  agent_id         String    @db.VarChar(50)
+  visit_date       DateTime  @db.Date
+  notes            String?   @db.Text
+  product_interest String?   @db.Text
+  next_visit_date  DateTime? @db.Date
+  created_at       DateTime? @default(now()) @db.Timestamp(0)
+  store            Store     @relation(fields: [store_id], references: [id])
 
+  @@index([store_id], map: "app_store_visits_store_id_fkey")
   @@map("app_store_visits")
 }
 
@@ -210,8 +224,9 @@ model Deal {
   expected_closing_date DateTime? @db.Date
   notes                 String?   @db.Text
   created_at            DateTime? @default(now()) @db.Timestamp(0)
-  company_rel           Company? @relation(fields: [company_id], references: [id])
+  company_rel           Company?  @relation(fields: [company_id], references: [id])
 
+  @@index([company_id], map: "app_deals_company_id_fkey")
   @@map("app_deals")
 }
 
@@ -271,6 +286,7 @@ model InwardEntry {
   vehicle_no    String?   @db.VarChar(50)
   company_id    String?   @db.VarChar(50)
   date          DateTime? @db.Date
+  due_date      DateTime? @db.Date
   status        String?   @db.VarChar(50)
   items_json    String?   @db.Text
   created_at    DateTime? @default(now()) @db.Timestamp(0)
@@ -294,13 +310,13 @@ model OutwardEntry {
   driver_name       String?   @db.VarChar(100)
   notes             String?   @db.Text
   company_id        String?   @db.VarChar(50)
-  inward_id         String?   @db.VarChar(50)
-  inward_no         String?   @db.VarChar(50)
   date              DateTime? @db.Date
   status            String?   @db.VarChar(50)
   amount            Float?    @default(0)
   items_json        String?   @db.Text
   created_at        DateTime? @default(now()) @db.Timestamp(0)
+  inward_id         String?   @db.VarChar(50)
+  inward_no         String?   @db.VarChar(50)
 
   @@map("app_outward_entries")
 }
@@ -353,11 +369,11 @@ model Voucher {
   company_id   String?   @db.VarChar(50)
   amount       Float?
   payment_mode String?   @db.VarChar(50)
-  cheque_no    String?   @db.VarChar(50)
   reference_no String?   @db.VarChar(100)
   description_ String?   @map("description?") @db.Text
   status       String?   @db.VarChar(50)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
+  cheque_no    String?   @db.VarChar(50)
 
   @@map("app_vouchers")
 }
@@ -612,16 +628,51 @@ model LegacyUser {
 }
 
 model AuditLog {
-  id          String   @id @db.VarChar(50)
-  action      String   @db.VarChar(100)
-  entity      String   @db.VarChar(100)
-  entity_id   String   @db.VarChar(100)
-  details     String?  @db.Text
-  user_id     String   @db.VarChar(50)
-  user_name   String   @db.VarChar(255)
-  company_id  String?  @db.VarChar(50)
-  created_at  DateTime @default(now()) @db.Timestamp(0)
+  id         String   @id @db.VarChar(50)
+  action     String   @db.VarChar(100)
+  entity     String   @db.VarChar(100)
+  entity_id  String   @db.VarChar(100)
+  details    String?  @db.Text
+  user_id    String   @db.VarChar(50)
+  user_name  String   @db.VarChar(255)
+  company_id String?  @db.VarChar(50)
+  created_at DateTime @default(now()) @db.Timestamp(0)
 
   @@map("app_audit_logs")
+}
+
+model InvoiceReminder {
+  id        String        @id @default(cuid())
+  invoiceId Int
+  companyId String        @db.VarChar(50)
+  enabled   Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  // Relations
+  invoice LegacyInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  company Company?       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([invoiceId, companyId])
+  @@map("invoice_reminders")
+}
+
+
+model EmailLog {
+  id             String   @id @default(cuid())
+  invoiceId      Int
+  customerId     Int
+  reminderType   String
+  emailSent      DateTime
+  recipientEmail String
+  status         String
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+
+  // Relations
+  invoice  LegacyInvoice?  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer LegacyCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("email_logs")
 }
 
