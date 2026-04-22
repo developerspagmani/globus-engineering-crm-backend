@@ -10,17 +10,62 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
   try {
     const entries = await prisma.inwardEntry.findMany({
-      where: companyId ? { company_id: String(companyId) } : {}
+      where: companyId ? { company_id: String(companyId) } : {},
+      orderBy: { date: 'desc' }
     });
     
-    const parsedEntries = entries.map((e: any) => ({
-      ...e,
-      items: JSON.parse(e.items_json || '[]')
-    }));
+    // Fetch all related invoices and outwards to calculate balances in bulk
+    const inwardIds = entries.map(e => e.id);
+    const invoices = await (prisma as any).legacyInvoice.findMany({
+        where: { inward_id: { in: inwardIds } }
+    });
+    const outwards = await prisma.outwardEntry.findMany({
+        where: { inward_id: { in: inwardIds } }
+    });
+
+    const parsedEntries = entries.map((e: any) => {
+      const items = JSON.parse(e.items_json || '[]');
+      
+      const balanceItems = items.map((item: any) => {
+        let totalDeducted = 0;
+
+        // 1. Deduct from Invoices
+        invoices.filter((inv: any) => inv.inward_id === e.id).forEach((inv: any) => {
+            const invItems = JSON.parse(inv.items_json || '[]');
+            const matching = invItems.find((ii: any) => (ii.description || ii.item_name) === (item.description || item.item_name));
+            if (matching) {
+                const q = parseFloat(matching.quantity || matching.qty || '0');
+                const w = parseFloat(matching.wopQty || matching.wop_qty || '0');
+                totalDeducted += (q + w);
+            }
+        });
+
+        // 2. Deduct from Outwards (Dispatches to Vendors)
+        outwards.filter((out: any) => out.inward_id === e.id).forEach((out: any) => {
+            const outItems = JSON.parse(out.items_json || '[]');
+            const matching = outItems.find((ii: any) => ii.description === item.description);
+            if (matching) totalDeducted += parseFloat(matching.quantity || matching.qty || '0');
+        });
+
+        const originalQty = parseFloat(item.quantity || item.qty || '0');
+        return {
+            ...item,
+            originalQty,
+            deductedQty: totalDeducted,
+            remainingQty: Math.max(0, originalQty - totalDeducted)
+        };
+      });
+
+      return {
+        ...e,
+        items: balanceItems,
+        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0)
+      };
+    });
     
     res.json(parsedEntries);
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to fetch inward entries', detail: error.message });
+    res.status(500).json({ error: 'Failed to fetch inward entries with balance', detail: error.message });
   }
 };
 
@@ -155,7 +200,9 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => ii.item_name === item.item_name || ii.id === item.id || (ii.description === item.description));
           if (matchingItem) {
-            totalInvoicedQty += parseFloat(matchingItem.qty || matchingItem.quantity || '0');
+            const q = parseFloat(matchingItem.qty || matchingItem.quantity || '0');
+            const w = parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0');
+            totalInvoicedQty += (q + w);
           }
         });
 

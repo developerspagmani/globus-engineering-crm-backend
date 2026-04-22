@@ -108,20 +108,32 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             remainingAmount -= paymentForThisInvoice;
           }
         }
+      }
 
-        // --- ALWAYS update the Ledger for any customer payment ---
-        const lastEntry = await tx.ledgerEntry.findFirst({
-          where: {
-            party_id: String(party_id),
-            company_id: finalCompanyId ? String(finalCompanyId) : undefined
-          },
-          orderBy: { created_at: 'desc' }
+      // 3. UPDATE LEDGER (For both Customers and Vendors)
+      if (party_id) {
+        const lastEntry = await (tx.ledgerEntry as any).findFirst({
+           where: {
+             party_id: String(party_id),
+             company_id: finalCompanyId ? String(finalCompanyId) : undefined
+           },
+           orderBy: { created_at: 'desc' }
         });
 
         const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-        const newBalance = lastBalance - finalAmount; // Credit decreases the balance
+        const isReceipt = type === 'receipt'; // Receipt (Credit for Cust, Debit for Vendor?? No, Receipt is money in)
+        
+        // Accounting Logic for Vouchers:
+        // Customer Receipt: Bal - Amt (Credit)
+        // Vendor Payment: Bal - Amt (Debit) -> Wait, if we owe vendor 1000 (Cr) and pay 200 (Dr), bal becomes 800 (Cr).
+        // Standardizing: 
+        // Customer: Receipt = Credit (-), Invoice = Debit (+)
+        // Vendor: Payment = Debit (-), Purchase = Credit (+)
+        
+        const change = finalAmount;
+        const newBalance = lastBalance - change; 
 
-        await tx.ledgerEntry.create({
+        await (tx.ledgerEntry as any).create({
           data: {
             id: crypto.randomUUID(),
             party_id: String(party_id),
@@ -129,12 +141,14 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             party_type: party_type || 'customer',
             company_id: finalCompanyId ? String(finalCompanyId) : null,
             date: date ? new Date(date) : new Date(),
-            type: 'credit',
+            vch_type: type.toUpperCase(), // RECEIPT or PAYMENT
+            vch_no: voucher.voucher_no || voucher.id,
+            type: type === 'receipt' ? 'credit' : 'debit',
             amount: finalAmount,
             balance: newBalance,
-            description: `Payment Received: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `for Ref: ${reference_no}` : ''}`,
+            description: `${type.charAt(0).toUpperCase() + type.slice(1)}: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `Ref: ${reference_no}` : ''}`,
             reference_id: voucher.voucher_no || voucher.id
-          } as any
+          }
         });
       }
 

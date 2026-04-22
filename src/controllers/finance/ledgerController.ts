@@ -4,14 +4,12 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 
 export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
-  const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
-  const partyId = req.query.partyId as string;
+  const { partyId, companyId: queryCompanyId } = req.query;
   const user = req.user;
-
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
   try {
-    const entries = await prisma.ledgerEntry.findMany({
+    const entries = await (prisma.ledgerEntry as any).findMany({
       where: {
         AND: [
           companyId ? {
@@ -23,7 +21,10 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
           partyId ? { party_id: String(partyId) } : {}
         ]
       },
-      orderBy: { created_at: 'desc' }
+      orderBy: [
+        { date: 'asc' },
+        { created_at: 'asc' }
+      ]
     });
     res.json(entries);
   } catch (error: any) {
@@ -32,18 +33,24 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
 };
 
 export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
-  const { partyId, partyName, partyType, date, type, amount, description, referenceId, companyId, company_id, linkedInvoiceId } = req.body;
+  const { 
+    partyId, partyName, partyType, date, type, amount, description, referenceId, linkedInvoiceId, company_id, companyId 
+  } = req.body;
   const user = req.user;
+  const vchType = req.body.vchType || 'MANUAL';
+  const vchNo = req.body.vchNo || referenceId;
+
   const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
 
   try {
     const finalAmount = parseFloat(String(amount || '0'));
     const finalType = (type || 'credit').toLowerCase();
+    const isVendor = (partyType || 'customer').toLowerCase() === 'vendor';
     const entryDate = date || new Date();
 
     // 1. FIND THE PREVIOUS BALANCE
-    const lastEntry = await prisma.ledgerEntry.findFirst({
+    const lastEntry = await (prisma.ledgerEntry as any).findFirst({
         where: {
             party_id: String(partyId),
             company_id: finalCompanyId ? String(finalCompanyId) : undefined
@@ -51,14 +58,18 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
         orderBy: { created_at: 'desc' }
     });
 
-    const lastBalance = lastEntry ? parseFloat(String((lastEntry as any).balance || '0')) : 0;
+    const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
     
     // 2. CALCULATE NEW BALANCE
-    // Debit (+) adds to balance, Credit (-) subtracts from balance
-    const newBalance = finalType === 'debit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
+    let newBalance = lastBalance;
+    if (isVendor) {
+      newBalance = finalType === 'credit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
+    } else {
+      newBalance = finalType === 'debit' ? (lastBalance + finalAmount) : (lastBalance - finalAmount);
+    }
 
     const entry = await prisma.$transaction(async (tx) => {
-      const newEntry = await (tx as any).ledgerEntry.create({
+      const newEntry = await (tx.ledgerEntry as any).create({
         data: {
           id: crypto.randomUUID(),
           party_id: String(partyId),
@@ -66,6 +77,8 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
           party_type: partyType || 'customer',
           company_id: finalCompanyId ? String(finalCompanyId) : null,
           date: new Date(entryDate),
+          vch_type: vchType,
+          vch_no: linkedInvoiceId ? String(linkedInvoiceId) : vchNo,
           type: finalType,
           amount: finalAmount,
           balance: newBalance,
@@ -74,69 +87,81 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
         }
       });
 
-      // 3. RECONCILIATION: Pay off invoices if this is a customer credit
-      if (finalType === 'credit' && (partyType || 'customer').toLowerCase() === 'customer') {
-        let remainingToApply = finalAmount;
+      // 3. RECONCILIATION
+      if (linkedInvoiceId || finalType === 'credit') {
+        const isCustomer = (partyType || 'customer').toLowerCase() === 'customer';
+        
+        if (isCustomer && finalType === 'credit') {
+          let remainingToApply = finalAmount;
 
-        // A. PRIORITY: If a specific invoice is linked, pay it first
-        if (linkedInvoiceId) {
-          const targetInv = await (tx as any).legacyInvoice.findUnique({
-             where: { id: parseInt(String(linkedInvoiceId)) }
-          });
+          // A. Priority: Linked Invoice
+          if (linkedInvoiceId) {
+            const targetInv = await (tx as any).legacyInvoice.findUnique({
+              where: { id: parseInt(String(linkedInvoiceId)) }
+            });
 
-          if (targetInv && targetInv.status !== 'PAID') {
-            const grandTotal = parseFloat(targetInv.grand_total || '0');
-            const paidAmount = parseFloat(targetInv.paid_amount || '0');
-            const balanceDue = grandTotal - paidAmount;
-            
-            if (balanceDue > 0) {
-              const application = Math.min(remainingToApply, balanceDue);
-              const newPaidTotal = paidAmount + application;
+            if (targetInv && targetInv.status !== 'PAID') {
+              const grandTotal = parseFloat(targetInv.grand_total || '0');
+              const paidAmount = parseFloat(targetInv.paid_amount || '0');
+              const balanceDue = grandTotal - paidAmount;
 
-              await (tx as any).legacyInvoice.update({
+              if (balanceDue > 0) {
+                const application = Math.min(remainingToApply, balanceDue);
+                const newPaidTotal = paidAmount + application;
+
+                await (tx as any).legacyInvoice.update({
                   where: { id: targetInv.id },
                   data: {
-                      paid_amount: String(newPaidTotal),
-                      status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                    paid_amount: String(newPaidTotal),
+                    status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
                   }
-              });
-              remainingToApply -= application;
+                });
+                remainingToApply -= application;
+              }
             }
           }
-        }
 
-        // B. FIFO: Apply remaining amount to oldest invoices
-        if (remainingToApply > 0) {
-          const pendingInvoices = await (tx as any).legacyInvoice.findMany({
-            where: {
-              customer_id: parseInt(String(partyId)),
-              status: { not: 'PAID' },
-              company_id: finalCompanyId,
-              // If we already paid part of a linked invoice, skip it in FIFO to avoid double counting
-              id: linkedInvoiceId ? { not: parseInt(String(linkedInvoiceId)) } : undefined
-            },
-            orderBy: { invoice_date: 'asc' }
-          });
+          // B. FIFO: Older Invoices
+          if (remainingToApply > 0) {
+            const pendingInvoices = await (tx as any).legacyInvoice.findMany({
+              where: {
+                customer_id: parseInt(String(partyId)),
+                status: { not: 'PAID' },
+                company_id: finalCompanyId,
+                id: linkedInvoiceId ? { not: parseInt(String(linkedInvoiceId)) } : undefined
+              },
+              orderBy: { invoice_date: 'asc' }
+            });
 
-          for (const inv of pendingInvoices) {
+            for (const inv of pendingInvoices) {
               if (remainingToApply <= 0) break;
               const grandTotal = parseFloat(inv.grand_total || '0');
               const paidAmount = parseFloat(inv.paid_amount || '0');
               const balanceDue = grandTotal - paidAmount;
-              
               if (balanceDue <= 0) continue;
 
               const application = Math.min(remainingToApply, balanceDue);
               const newPaidTotal = paidAmount + application;
 
               await (tx as any).legacyInvoice.update({
-                  where: { id: inv.id },
-                  data: {
-                      paid_amount: String(newPaidTotal),
-                      status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
-                  }
+                where: { id: inv.id },
+                data: {
+                  paid_amount: String(newPaidTotal),
+                  status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                }
               });
               remainingToApply -= application;
+            }
+          }
+        } else if (linkedInvoiceId) {
+          // If not handled as a Customer Invoice, handle as an Inward (for both Customer/Vendor)
+          try {
+            await (tx as any).inwardEntry.update({
+              where: { id: String(linkedInvoiceId) },
+              data: { status: 'completed' }
+            });
+          } catch (e) {
+            console.log("[LEDGER] Skip inward reconciliation - not found or already handled");
           }
         }
       }
