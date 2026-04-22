@@ -55,6 +55,14 @@ export const login = async (req: Request, res: Response) => {
       { expiresIn: '24h' }
     );
 
+    const mappedCompany = user.company ? {
+      ...user.company,
+      activeModules: user.company.active_modules ? JSON.parse(user.company.active_modules) : [],
+      logo: user.company.logo,
+      logoSecondary: user.company.logo_secondary,
+      invoiceSettings: user.company.invoice_settings ? JSON.parse(user.company.invoice_settings) : null
+    } : null;
+
     res.json({ 
       token, 
       user: { 
@@ -64,7 +72,7 @@ export const login = async (req: Request, res: Response) => {
         assignedArea: (user as any).assigned_area,
         modulePermissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
       },
-      company: user.company 
+      company: mappedCompany 
     });
   } catch (error: any) {
     console.error('[LOGIN_ERROR]', error);
@@ -105,7 +113,20 @@ export const getMe = async (req: any, res: Response) => {
       include: { company: true }
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    res.json(user);
+    
+    const mappedCompany = user.company ? {
+      ...user.company,
+      activeModules: user.company.active_modules ? JSON.parse(user.company.active_modules) : [],
+      logo: user.company.logo,
+      logoSecondary: user.company.logo_secondary,
+      invoiceSettings: user.company.invoice_settings ? JSON.parse(user.company.invoice_settings) : null
+    } : null;
+
+    res.json({
+      ...user,
+      password: '',
+      company: mappedCompany
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch user', detail: error.message });
   }
