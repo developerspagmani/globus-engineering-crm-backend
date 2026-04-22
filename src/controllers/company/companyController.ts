@@ -2,6 +2,27 @@ import { Request, Response } from 'express';
 import prisma from '../../config/prisma';
 import crypto from 'crypto';
 
+export const getCompanyById = async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const company = await prisma.company.findUnique({
+      where: { id: String(id) }
+    });
+    
+    if (!company) return res.status(404).json({ error: 'Company not found' });
+
+    res.json({
+      ...company,
+      activeModules: company.active_modules ? JSON.parse(company.active_modules) : [],
+      logo: company.logo,
+      logoSecondary: company.logo_secondary,
+      invoiceSettings: company.invoice_settings ? JSON.parse(company.invoice_settings) : null
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch company', detail: error.message });
+  }
+};
+
 export const getAllCompanies = async (req: Request, res: Response) => {
   try {
     const companies = await prisma.company.findMany();
@@ -47,24 +68,33 @@ export const createCompany = async (req: Request, res: Response) => {
 export const updateCompany = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { name, slug, plan, activeModules, logo, logoSecondary, invoiceSettings } = req.body;
+  
   try {
+    const updateData: any = {};
+    
+    if (name !== undefined) updateData.name = name;
+    if (slug !== undefined) updateData.slug = slug;
+    if (plan !== undefined) updateData.plan = plan;
+    if (activeModules !== undefined) updateData.active_modules = JSON.stringify(activeModules);
+    
+    // Support both camelCase and snake_case for logos from frontend
+    if (logo !== undefined) updateData.logo = logo;
+    if (logoSecondary !== undefined) updateData.logo_secondary = logoSecondary;
+    
+    if (invoiceSettings !== undefined) {
+      updateData.invoice_settings = JSON.stringify(invoiceSettings);
+    }
+
     const company = await prisma.company.update({
       where: { id: String(id) },
-      data: {
-        name,
-        slug,
-        plan,
-        active_modules: JSON.stringify(activeModules || []),
-        logo: logo,
-        logo_secondary: logoSecondary,
-        invoice_settings: JSON.stringify(invoiceSettings || null)
-      } as any
+      data: updateData
     });
+
     res.json({
         ...company,
-        activeModules: activeModules || JSON.parse(company.active_modules || '[]'),
+        activeModules: company.active_modules ? JSON.parse(company.active_modules) : [],
         logoSecondary: company.logo_secondary,
-        invoiceSettings: invoiceSettings || (company.invoice_settings ? JSON.parse(company.invoice_settings) : null)
+        invoiceSettings: company.invoice_settings ? JSON.parse(company.invoice_settings) : null
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update company', detail: error.message });

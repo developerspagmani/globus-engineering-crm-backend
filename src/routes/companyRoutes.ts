@@ -11,6 +11,7 @@ const router = Router();
  *   post: { summary: Create company (Super Admin), tags: [Administration], responses: { 201: { description: Created } } }
  */
 router.get('/companies', companyController.getAllCompanies);
+router.get('/companies/:id', companyController.getCompanyById);
 router.post('/companies', authorize(['super_admin']) as any, companyController.createCompany);
 router.put('/companies/:id', authorize(['super_admin', 'company_admin']) as any, companyController.updateCompany);
 router.delete('/companies/:id', authorize(['super_admin']) as any, companyController.deleteCompany);
