@@ -291,6 +291,7 @@ model InwardEntry {
   items_json    String?   @db.Text
   created_at    DateTime? @default(now()) @db.Timestamp(0)
   po_date       DateTime? @db.Date
+  party_type    String?   @db.VarChar(50)
 
   @@map("app_inward_entries")
 }
@@ -317,6 +318,7 @@ model OutwardEntry {
   created_at        DateTime? @default(now()) @db.Timestamp(0)
   inward_id         String?   @db.VarChar(50)
   inward_no         String?   @db.VarChar(50)
+  party_type        String?   @db.VarChar(50)
 
   @@map("app_outward_entries")
 }
@@ -335,6 +337,7 @@ model LedgerEntry {
   balance      Float
   description  String?   @db.Text
   reference_id String?   @db.VarChar(100)
+  vch_type     String?   @db.VarChar(50)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
 
   @@map("app_ledger_entries")

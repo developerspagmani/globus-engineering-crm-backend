@@ -31,7 +31,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       prisma.legacyInvoice.findMany({
         where: { company_id: companyId },
         orderBy: { app_created_at: 'desc' },
-        take: 5,
+        take: 10,
         select: {
           id: true,
           invoice_no: true,
@@ -44,7 +44,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       prisma.inwardEntry.findMany({
         where: { company_id: companyId },
         orderBy: { created_at: 'desc' },
-        take: 5,
+        take: 10,
         select: {
           id: true,
           inward_no: true,
