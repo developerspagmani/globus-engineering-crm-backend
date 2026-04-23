@@ -135,6 +135,21 @@ model Company {
   logo             String?           @db.LongText
   logo_secondary   String?           @db.LongText
   invoice_settings String?           @db.LongText
+  
+  // Separate columns for critical invoice/company data
+  company_name       String?         @db.VarChar(255)
+  company_sub_header String?         @db.VarChar(255)
+  company_address    String?         @db.Text
+  gst_no             String?         @db.VarChar(50)
+  state_details      String?         @db.VarChar(100)
+  vat_tin            String?         @db.VarChar(50)
+  cst_no             String?         @db.VarChar(50)
+  pan_no             String?         @db.VarChar(50)
+  bank_name          String?         @db.VarChar(255)
+  bank_acc           String?         @db.VarChar(100)
+  bank_branch_ifsc   String?         @db.VarChar(100)
+  declaration_text   String?         @db.Text
+
   users            User[]
   leads            Lead[]
   deals            Deal[]
@@ -319,13 +334,6 @@ model OutwardEntry {
   created_at        DateTime? @default(now()) @db.Timestamp(0)
   inward_id         String?   @db.VarChar(50)
   inward_no         String?   @db.VarChar(50)
-  party_type        String?   @db.VarChar(50)
-  vendor_id         String?   @db.VarChar(50)
-  vendor_name       String?   @db.VarChar(255)
-  process_name      String?   @db.VarChar(100)
-  driver_name       String?   @db.VarChar(100)
-  notes             String?   @db.Text
-  amount            Float?
 
   @@map("app_outward_entries")
 }
@@ -344,8 +352,6 @@ model LedgerEntry {
   balance      Float
   description  String?   @db.Text
   reference_id String?   @db.VarChar(100)
-  vch_type     String?   @db.VarChar(50)
-  vch_no       String?   @db.VarChar(50)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
 
   @@map("app_ledger_entries")

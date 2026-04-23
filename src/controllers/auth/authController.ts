@@ -6,6 +6,32 @@ import crypto from 'crypto';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'globus_crm_secret_key_2024';
 
+const mapCompany = (company: any) => {
+  if (!company) return null;
+  const parsedSettings = company.invoice_settings ? JSON.parse(company.invoice_settings) : {};
+  return {
+    ...company,
+    activeModules: company.active_modules ? JSON.parse(company.active_modules) : [],
+    logo: company.logo,
+    logoSecondary: company.logo_secondary,
+    invoiceSettings: {
+      ...parsedSettings,
+      companyName: company.company_name || parsedSettings.companyName,
+      companySubHeader: company.company_sub_header || parsedSettings.companySubHeader,
+      companyAddress: company.company_address || parsedSettings.companyAddress,
+      gstNo: company.gst_no || parsedSettings.gstNo,
+      stateDetails: company.state_details || parsedSettings.stateDetails,
+      vatTin: company.vat_tin || parsedSettings.vatTin,
+      cstNo: company.cst_no || parsedSettings.cstNo,
+      panNo: company.pan_no || parsedSettings.panNo,
+      bankName: company.bank_name || parsedSettings.bankName,
+      bankAcc: company.bank_acc || parsedSettings.bankAcc,
+      bankBranchIfsc: company.bank_branch_ifsc || parsedSettings.bankBranchIfsc,
+      declarationText: company.declaration_text || parsedSettings.declarationText,
+    }
+  };
+};
+
 export const login = async (req: Request, res: Response) => {
   const { email, password, company_id } = req.body;
   try {
@@ -55,14 +81,6 @@ export const login = async (req: Request, res: Response) => {
       { expiresIn: '24h' }
     );
 
-    const mappedCompany = user.company ? {
-      ...user.company,
-      activeModules: user.company.active_modules ? JSON.parse(user.company.active_modules) : [],
-      logo: user.company.logo,
-      logoSecondary: user.company.logo_secondary,
-      invoiceSettings: user.company.invoice_settings ? JSON.parse(user.company.invoice_settings) : null
-    } : null;
-
     res.json({ 
       token, 
       user: { 
@@ -72,7 +90,7 @@ export const login = async (req: Request, res: Response) => {
         assignedArea: (user as any).assigned_area,
         modulePermissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
       },
-      company: mappedCompany 
+      company: mapCompany(user.company)
     });
   } catch (error: any) {
     console.error('[LOGIN_ERROR]', error);
@@ -114,18 +132,10 @@ export const getMe = async (req: any, res: Response) => {
     });
     if (!user) return res.status(404).json({ error: 'User not found' });
     
-    const mappedCompany = user.company ? {
-      ...user.company,
-      activeModules: user.company.active_modules ? JSON.parse(user.company.active_modules) : [],
-      logo: user.company.logo,
-      logoSecondary: user.company.logo_secondary,
-      invoiceSettings: user.company.invoice_settings ? JSON.parse(user.company.invoice_settings) : null
-    } : null;
-
     res.json({
       ...user,
       password: '',
-      company: mappedCompany
+      company: mapCompany(user.company)
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch user', detail: error.message });

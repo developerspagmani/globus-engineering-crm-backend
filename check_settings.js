@@ -10,8 +10,14 @@ async function main() {
     console.log(`  Logo Present: ${!!c.logo}`);
     console.log(`  Secondary Logo Present: ${!!c.logo_secondary}`);
     console.log(`  Invoice Settings Present: ${!!c.invoice_settings}`);
+    if (c.logo) {
+      console.log(`  Logo Start: ${c.logo.substring(0, 50)}...`);
+    }
+    if (c.logo_secondary) {
+      console.log(`  Secondary Logo Start: ${c.logo_secondary.substring(0, 50)}...`);
+    }
     if (c.invoice_settings) {
-      console.log(`  Settings JSON: ${c.invoice_settings.substring(0, 100)}...`);
+      console.log(`  Settings JSON: ${c.invoice_settings}`);
     }
   });
 }
