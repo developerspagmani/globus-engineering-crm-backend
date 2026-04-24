@@ -4,14 +4,17 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 
 export const getInwardEntries = async (req: AuthRequest, res: Response) => {
-  const queryCompanyId = req.query.companyId as string;
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
-  const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
+  const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId);
 
   try {
     const entries = await prisma.inwardEntry.findMany({
       where: companyId ? { company_id: String(companyId) } : {},
-      orderBy: { date: 'desc' }
+      orderBy: [
+        { date: 'desc' },
+        { created_at: 'desc' }
+      ]
     });
     
     // Fetch all related invoices and outwards to calculate balances in bulk
@@ -28,11 +31,12 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       
       const balanceItems = items.map((item: any) => {
         let totalDeducted = 0;
+        const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
 
         // 1. Deduct from Invoices
         invoices.filter((inv: any) => inv.inward_id === e.id).forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
-            const matching = invItems.find((ii: any) => (ii.description || ii.item_name) === (item.description || item.item_name));
+            const matching = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
             if (matching) {
                 const q = parseFloat(matching.quantity || matching.qty || '0');
                 const w = parseFloat(matching.wopQty || matching.wop_qty || '0');
@@ -43,7 +47,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         // 2. Deduct from Outwards (Dispatches to Vendors)
         outwards.filter((out: any) => out.inward_id === e.id).forEach((out: any) => {
             const outItems = JSON.parse(out.items_json || '[]');
-            const matching = outItems.find((ii: any) => ii.description === item.description);
+            const matching = outItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
             if (matching) totalDeducted += parseFloat(matching.quantity || matching.qty || '0');
         });
 
@@ -187,18 +191,28 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         inward_id: { in: inwards.map(i => i.id) }
       }
     });
+    
+    // 3. Get all related outwards to calculate what's at vendors
+    const relatedOutwards = await prisma.outwardEntry.findMany({
+      where: {
+        inward_id: { in: inwards.map(i => i.id) }
+      }
+    });
 
     // console.log(`[DIAGNOSTIC] Related Invoices found: ${relatedInvoices.length}`);
 
     const results = inwards.map(entry => {
       const originalItems = JSON.parse(entry.items_json || '[]');
       const invoicedForThisEntry = relatedInvoices.filter((inv: any) => inv.inward_id === entry.id);
+      const outwardsForThisEntry = relatedOutwards.filter((ow: any) => ow.inward_id === entry.id);
       
       const balanceItems = originalItems.map((item: any) => {
         let totalInvoicedQty = 0;
+        const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
+        
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
-          const matchingItem = invItems.find((ii: any) => ii.item_name === item.item_name || ii.id === item.id || (ii.description === item.description));
+          const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
             const q = parseFloat(matchingItem.qty || matchingItem.quantity || '0');
             const w = parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0');
@@ -206,12 +220,26 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
           }
         });
 
-        const rem = parseFloat(item.quantity || item.qty || '0') - totalInvoicedQty;
+        let totalSentToVendorQty = 0;
+        outwardsForThisEntry.forEach((ow: any) => {
+          const owItems = JSON.parse(ow.items_json || '[]');
+          const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
+          if (matchingItem) {
+            totalSentToVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+          }
+        });
+
+        const original = parseFloat(item.quantity || item.qty || '0');
+        const inHouse = original - totalInvoicedQty - totalSentToVendorQty;
+        const rem = Math.max(0, inHouse); 
+
         return {
           ...item,
-          originalQty: parseFloat(item.quantity || item.qty || '0'),
+          originalQty: original,
           invoicedQty: totalInvoicedQty,
-          remainingQty: rem
+          sentToVendor: totalSentToVendorQty,
+          remainingQty: rem,
+          inHouseQty: rem
         };
       });
 

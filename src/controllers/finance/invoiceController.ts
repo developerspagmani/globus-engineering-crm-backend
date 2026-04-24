@@ -110,7 +110,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
           delivery_no: delNo,
           invoice_date: date ? new Date(date) : new Date(),
           due_date: dueDate ? new Date(dueDate) : null,
-          customer_id: customerId ? parseInt(String(customerId)) : null,
+          customer: customerId ? { connect: { id: parseInt(String(customerId)) } } : undefined,
           customer_name: customerName,
           address,
           total: String(subTotal || '0'),

@@ -77,18 +77,18 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           await (prisma.ledgerEntry as any).create({
              data: {
                 id: crypto.randomUUID(),
-                partyId: String(vendor_id),
-                partyName: vendor_name || 'N/A',
-                partyType: 'vendor',
+                party_id: String(vendor_id),
+                party_name: vendor_name || 'N/A',
+                party_type: 'vendor',
                 company_id: finalCompanyId,
                 date: new Date(),
-                vchType: 'OUTWARD',
-                vchNo: outward_no,
+                vch_type: 'OUTWARD',
+                vch_no: outward_no,
                 type: 'debit',
                 amount: jobValue,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${process_name || 'Processing'} (Qty: ${totalQty})`,
-                referenceNo: entry.id
+                reference_id: entry.id
              }
           });
        }
@@ -138,7 +138,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
 
     if ((party_type || 'customer').toLowerCase() === 'vendor' && vendor_id && jobValue > 0) {
        const existingLedger = await (prisma.ledgerEntry as any).findFirst({
-          where: { referenceNo: String(entry.id) }
+          where: { reference_id: String(entry.id) }
        });
 
        const totalQty = JSON.parse(entry.items_json || '[]').reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
@@ -165,8 +165,8 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
              data: {
                 id: crypto.randomUUID(),
                 party_id: String(vendor_id),
-                partyName: vendor_name || 'N/A',
-                partyType: 'vendor',
+                party_name: vendor_name || 'N/A',
+                party_type: 'vendor',
                 company_id: finalCompanyId,
                 date: new Date(),
                 vch_type: 'OUTWARD',
