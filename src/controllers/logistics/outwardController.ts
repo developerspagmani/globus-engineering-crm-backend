@@ -10,7 +10,8 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
 
   try {
     const entries = await prisma.outwardEntry.findMany({
-      where: companyId ? { company_id: String(companyId) } : {}
+      where: companyId ? { company_id: String(companyId) } : {},
+      orderBy: { created_at: 'desc' }
     });
     
     const parsedEntries = entries.map((e: any) => ({
@@ -101,17 +102,17 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
              data: {
                 id: crypto.randomUUID(),
                 party_id: String(finalVendorId),
-                party_name: finalVendorName || 'N/A',
+                party_name: String(finalVendorName || 'N/A'),
                 party_type: 'vendor',
                 company_id: finalCompanyId,
                 date: new Date(),
                 vch_type: 'OUTWARD',
-                vch_no: finalOutwardNo,
+                vch_no: String(finalOutwardNo || ''),
                 type: 'debit',
                 amount: jobValue,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
-                reference_id: entry.id
+                reference_id: String(entry.id)
              }
           });
        }
@@ -205,17 +206,17 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
              data: {
                 id: crypto.randomUUID(),
                 party_id: String(finalVendorId),
-                party_name: finalVendorName || 'N/A',
+                party_name: String(finalVendorName || 'N/A'),
                 party_type: 'vendor',
                 company_id: finalCompanyId,
                 date: new Date(),
                 vch_type: 'OUTWARD',
-                vch_no: finalOutwardNo || String((entry as any).outward_no || ''),
+                vch_no: String(finalOutwardNo || (entry as any).outward_no || ''),
                 type: 'debit',
                 amount: jobValue,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
-                reference_id: entry.id
+                reference_id: String(entry.id)
              }
           });
        }
