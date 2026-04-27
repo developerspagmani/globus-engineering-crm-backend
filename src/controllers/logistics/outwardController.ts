@@ -4,13 +4,22 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 
 export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
-  const queryCompanyId = req.query.companyId as string;
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
-  const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
+  const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
   try {
     const entries = await prisma.outwardEntry.findMany({
-      where: companyId ? { company_id: String(companyId) } : {}
+      where: companyId ? { 
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() }
+        ]
+      } : {},
+      orderBy: [
+        { date: 'desc' },
+        { created_at: 'desc' }
+      ]
     });
     
     const parsedEntries = entries.map((e: any) => ({
@@ -104,19 +113,25 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
 
           await (prisma as any).ledgerEntry.create({
              data: {
+<<<<<<< HEAD
                 id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
                 party_id: finalVendorId,
                 party_name: finalVendorName || 'N/A',
+=======
+                id: crypto.randomUUID(),
+                party_id: String(finalVendorId),
+                party_name: String(finalVendorName || 'N/A'),
+>>>>>>> 02f3777fc8bd360cdd1b954db5da4bb3f2bd857e
                 party_type: 'vendor',
                 company_id: finalCompanyId ? String(finalCompanyId) : null,
                 date: new Date(),
                 vch_type: 'OUTWARD',
-                vch_no: finalOutwardNo,
+                vch_no: String(finalOutwardNo || ''),
                 type: 'debit',
                 amount: finalAmount,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
-                reference_id: entry.id
+                reference_id: String(entry.id)
              }
           });
        }
@@ -216,19 +231,29 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
 
           await (prisma as any).ledgerEntry.create({
              data: {
+<<<<<<< HEAD
                 id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
                 party_id: finalVendorId,
                 party_name: finalVendorName || 'N/A',
+=======
+                id: crypto.randomUUID(),
+                party_id: String(finalVendorId),
+                party_name: String(finalVendorName || 'N/A'),
+>>>>>>> 02f3777fc8bd360cdd1b954db5da4bb3f2bd857e
                 party_type: 'vendor',
                 company_id: finalCompanyId ? String(finalCompanyId) : null,
                 date: new Date(),
                 vch_type: 'OUTWARD',
+<<<<<<< HEAD
                 vch_no: finalOutwardNo,
+=======
+                vch_no: String(finalOutwardNo || (entry as any).outward_no || ''),
+>>>>>>> 02f3777fc8bd360cdd1b954db5da4bb3f2bd857e
                 type: 'debit',
                 amount: finalAmount,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
-                reference_id: entry.id
+                reference_id: String(entry.id)
              }
           });
        }

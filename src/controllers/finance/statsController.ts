@@ -30,7 +30,10 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       prisma.vendor.count({ where: { company_id: companyId, status: 'active' } }),
       prisma.legacyInvoice.findMany({
         where: { company_id: companyId },
-        orderBy: { app_created_at: 'desc' },
+        orderBy: [
+          { invoice_date: 'desc' },
+          { app_created_at: 'desc' }
+        ],
         take: 10,
         select: {
           id: true,
@@ -43,7 +46,10 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       }),
       prisma.inwardEntry.findMany({
         where: { company_id: companyId },
-        orderBy: { created_at: 'desc' },
+        orderBy: [
+          { date: 'desc' },
+          { created_at: 'desc' }
+        ],
         take: 10,
         select: {
           id: true,
