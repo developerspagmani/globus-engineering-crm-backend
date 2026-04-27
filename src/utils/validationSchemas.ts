@@ -48,7 +48,7 @@ export const vendorSchema: Schema = {
 export const invoiceSchema: Schema = {
   invoice_date: { required: true, type: 'date', message: 'Invoice Date is required' },
   customer_id: { required: true, message: 'Customer is required' },
-  items_json: { required: true, message: 'Item details are required' },
+  items: { required: true, message: 'Item details are required' },
   grand_total: { required: true, message: 'Total Amount is required' },
   tax_rate: { required: true, type: 'number', message: 'Tax Rate is required' },
 };
@@ -68,17 +68,17 @@ export const companySchema: Schema = {
 
 export const inwardSchema: Schema = {
   date: { required: true, type: 'date', message: 'Date is required' },
-  customerId: { required: true, message: 'Customer is required' },
-  inwardNo: { required: true, message: 'Inward Number is required' },
-  dueDate: { required: true, type: 'date', message: 'Due Date is required' },
+  customer_id: { required: true, message: 'Customer is required' },
+  inward_no: { required: true, message: 'Inward Number is required' },
+  due_date: { required: true, type: 'date', message: 'Due Date is required' },
   items: { required: true, message: 'Item details are required' },
 };
 
 
 export const outwardSchema: Schema = {
   date: { required: true, type: 'date', message: 'Date is required' },
-  outwardNo: { required: true, message: 'Outward/Challan Number is required' },
-  vehicleNo: { required: true, message: 'Vehicle Number is required' },
+  outward_no: { required: true, message: 'Outward/Challan Number is required' },
+  vehicle_no: { required: true, message: 'Vehicle Number is required' },
   items: { required: true, message: 'Item details are required' },
 };
 
@@ -92,7 +92,6 @@ export const employeeSchema: Schema = {
   name: { required: true, message: 'Full Name is required' },
   email: { required: true, type: 'email', message: 'Valid Email is required' },
   phone: { required: true, type: 'phone', message: 'Valid 10-digit Phone is required' },
-  employeeId: { required: true, message: 'Employee ID is required' },
   designation: { required: true, message: 'Designation is required' },
   salary: { required: true, type: 'number', message: 'Salary is required' },
   joiningDate: { required: true, type: 'date', message: 'Joining Date is required' },
@@ -108,7 +107,7 @@ export const leadSchema: Schema = {
   company: { required: true, message: 'Company Name is required' },
   email: { required: true, type: 'email', message: 'Valid Email is required' },
   phone: { required: true, type: 'phone', message: 'Valid 10-digit Phone is required' },
-  assignedArea: { required: true, message: 'Geographic Area is required' },
+  assigned_area: { required: true, message: 'Geographic Area is required' },
 };
 
 
@@ -121,6 +120,7 @@ export const priceFixingSchema: Schema = {
 
 export const storeSchema: Schema = {
   name: { required: true, message: 'Store Name is required' },
+  owner_name: { required: true, message: 'Owner Name is required' },
   phone: { required: true, type: 'phone', message: '10-digit Phone is required' },
   address: { required: true, message: 'Address is required' },
 };
@@ -132,17 +132,18 @@ export const storeVisitSchema: Schema = {
 
 export const voucherSchema: Schema = {
   date: { required: true, type: 'date', message: 'Voucher Date is required' },
-  partyId: { required: true, message: 'Party (Customer/Vendor) is required' },
+  party_id: { required: true, message: 'Party (Customer/Vendor) is required' },
   amount: { required: true, type: 'number', message: 'Amount is required' },
-  paymentMode: { required: true, message: 'Payment Mode is required' },
+  payment_mode: { required: true, message: 'Payment Mode is required' },
 };
 
 
 export const challanSchema: Schema = {
   challan_no: { required: true, message: 'Challan Number is required' },
   party_name: { required: true, message: 'Party Name is required' },
-  items_json: { required: true, message: 'Item details are required' },
+  items: { required: true, message: 'Item details are required' },
 };
+
 
 export const validateData = (data: any, schema: Schema) => {
   const errors: { [key: string]: string } = {};
