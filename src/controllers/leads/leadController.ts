@@ -25,6 +25,11 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
 
 export const createLead = async (req: AuthRequest, res: Response) => {
   const { id, name, email, phone, company, industry, source, status, notes, assigned_area, product_interest, next_visit_date } = req.body;
+  
+  // Validation for mandatory fields
+  if (!name) return res.status(400).json({ error: 'Lead name is mandatory' });
+  if (!phone) return res.status(400).json({ error: 'Phone number is mandatory' });
+
   const user = req.user;
 
   try {
@@ -56,6 +61,11 @@ export const createLead = async (req: AuthRequest, res: Response) => {
 export const updateLead = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
   const { name, email, phone, company, industry, source, status, notes, assigned_area, product_interest, next_visit_date } = req.body;
+  
+  // Validation for mandatory fields if provided
+  if (name !== undefined && !name) return res.status(400).json({ error: 'Lead name is mandatory' });
+  if (phone !== undefined && !phone) return res.status(400).json({ error: 'Phone number is mandatory' });
+
   try {
     const lead = await prisma.lead.update({
       where: { id },

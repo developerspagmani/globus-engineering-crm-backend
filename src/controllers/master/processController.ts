@@ -18,6 +18,12 @@ export const getProcesses = async (req: Request, res: Response) => {
 export const createProcess = async (req: Request, res: Response) => {
   try {
     const data = req.body;
+    
+    // Validation for mandatory fields
+    if (!data.processName) {
+      return res.status(400).json({ success: false, message: 'Process name is mandatory' });
+    }
+
     const user: any = (req as any).user;
     
     const userCompanyId = user?.company_id || user?.companyId;
@@ -48,6 +54,10 @@ export const updateProcess = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    
+    // Validation for mandatory fields if provided
+    if (data.processName !== undefined && !data.processName) return res.status(400).json({ success: false, message: 'Process name is mandatory' });
+
     const process = await (prisma as any).process.update({
       where: { id },
       data: {

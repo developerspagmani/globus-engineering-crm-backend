@@ -65,6 +65,21 @@ export const createVendor = async (req: AuthRequest, res: Response) => {
     landline, fax, gst, tin, cst, vendorType
   } = req.body;
 
+  // Validation for mandatory fields
+  const missingFields = [];
+  if (!name) missingFields.push('name');
+  if (!phone) missingFields.push('phone');
+  if (!street1) missingFields.push('street1');
+  if (!city) missingFields.push('city');
+  if (!state) missingFields.push('state');
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({ 
+      error: 'Missing mandatory fields', 
+      fields: missingFields 
+    });
+  }
+
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (companyId || company_id) : (user?.company_id || companyId || company_id);
 
@@ -119,6 +134,13 @@ export const createVendor = async (req: AuthRequest, res: Response) => {
 export const updateVendor = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
   const { name, email, phone, company, category, status, street1, city, state, gst } = req.body;
+
+  // Validation for mandatory fields if provided
+  if (name !== undefined && !name) return res.status(400).json({ error: 'Vendor name is mandatory' });
+  if (phone !== undefined && !phone) return res.status(400).json({ error: 'Phone number is mandatory' });
+  if (street1 !== undefined && !street1) return res.status(400).json({ error: 'Street address is mandatory' });
+  if (city !== undefined && !city) return res.status(400).json({ error: 'City is mandatory' });
+  if (state !== undefined && !state) return res.status(400).json({ error: 'State is mandatory' });
 
   try {
     const vendor = await prisma.vendor.update({

@@ -76,6 +76,22 @@ export const createCustomer = async (req: AuthRequest, res: Response) => {
     customerType
   } = req.body;
 
+  // Validation for mandatory fields
+  const missingFields = [];
+  if (!name) missingFields.push('name');
+  if (!phone) missingFields.push('phone');
+  if (!street1) missingFields.push('street1');
+  if (!city) missingFields.push('city');
+  if (!state) missingFields.push('state');
+  if (!pinCode) missingFields.push('pinCode');
+
+  if (missingFields.length > 0) {
+    return res.status(400).json({ 
+      error: 'Missing mandatory fields', 
+      fields: missingFields 
+    });
+  }
+
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (companyId || company_id) : (user?.company_id || (user as any)?.companyId || companyId || company_id);
 
@@ -136,6 +152,14 @@ export const updateCustomer = async (req: AuthRequest, res: Response) => {
     contactPerson3, designation3, emailId3, phoneNumber3,
     landline, fax, gst, tin, cst, tc, vmc, hmc, paymentTerms, customerType
   } = req.body;
+
+  // Validation for mandatory fields if they are provided in the update
+  if (name !== undefined && !name) return res.status(400).json({ error: 'Customer name is mandatory' });
+  if (phone !== undefined && !phone) return res.status(400).json({ error: 'Phone number is mandatory' });
+  if (street1 !== undefined && !street1) return res.status(400).json({ error: 'Street address is mandatory' });
+  if (city !== undefined && !city) return res.status(400).json({ error: 'City is mandatory' });
+  if (state !== undefined && !state) return res.status(400).json({ error: 'State is mandatory' });
+  if (pinCode !== undefined && !pinCode) return res.status(400).json({ error: 'Pin code is mandatory' });
 
   try {
     const customer = await prisma.legacyCustomer.update({

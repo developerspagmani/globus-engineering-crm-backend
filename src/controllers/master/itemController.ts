@@ -18,6 +18,12 @@ export const getItems = async (req: Request, res: Response) => {
 export const createItem = async (req: Request, res: Response) => {
   try {
     const data = req.body;
+    
+    // Validation for mandatory fields
+    if (!data.itemName || !data.itemCode) {
+      return res.status(400).json({ success: false, message: 'Item name and code are mandatory' });
+    }
+
     const user: any = (req as any).user;
     
     const userCompanyId = user?.company_id || user?.companyId;
@@ -49,6 +55,11 @@ export const updateItem = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    
+    // Validation for mandatory fields if provided
+    if (data.itemName !== undefined && !data.itemName) return res.status(400).json({ success: false, message: 'Item name is mandatory' });
+    if (data.itemCode !== undefined && !data.itemCode) return res.status(400).json({ success: false, message: 'Item code is mandatory' });
+
     const item = await (prisma as any).item.update({
       where: { id },
       data: {
