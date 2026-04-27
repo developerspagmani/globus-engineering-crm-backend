@@ -2,6 +2,10 @@ import { Router } from 'express';
 import * as leadController from '../controllers/leads/leadController';
 import * as dealController from '../controllers/leads/dealController';
 import { checkPermission } from '../middleware/authMiddleware';
+import { validateRequest } from '../middleware/validationMiddleware';
+import { leadSchema } from '../utils/validationSchemas';
+
+
 
 const router = Router();
 
@@ -16,8 +20,9 @@ const router = Router();
  */
 // Leads
 router.get('/leads', checkPermission('mod_lead', 'canRead') as any, leadController.getAllLeads);
-router.post('/leads', checkPermission('mod_lead', 'canCreate') as any, leadController.createLead);
-router.put('/leads/:id', checkPermission('mod_lead', 'canEdit') as any, leadController.updateLead);
+router.post('/leads', checkPermission('mod_lead', 'canCreate') as any, validateRequest(leadSchema) as any, leadController.createLead);
+router.put('/leads/:id', checkPermission('mod_lead', 'canEdit') as any, validateRequest(leadSchema) as any, leadController.updateLead);
+
 router.delete('/leads/:id', checkPermission('mod_lead', 'canDelete') as any, leadController.deleteLead);
 
 // Deals (Split into dealController)

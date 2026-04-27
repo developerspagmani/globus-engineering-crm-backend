@@ -3,6 +3,8 @@ import * as itemController from '../controllers/master/itemController';
 import * as processController from '../controllers/master/processController';
 import * as priceFixingController from '../controllers/master/priceFixingController';
 import { checkPermission } from '../middleware/authMiddleware';
+import { validateRequest } from '../middleware/validationMiddleware';
+import { itemSchema, processSchema, priceFixingSchema } from '../utils/validationSchemas';
 
 const router = Router();
 
@@ -77,20 +79,23 @@ const router = Router();
  */
 // Items
 router.get('/items', checkPermission('mod_items', 'canRead'), itemController.getItems);
-router.post('/items', checkPermission('mod_items', 'canCreate'), itemController.createItem);
-router.put('/items/:id', checkPermission('mod_items', 'canEdit'), itemController.updateItem);
+router.post('/items', checkPermission('mod_items', 'canCreate'), validateRequest(itemSchema), itemController.createItem);
+router.put('/items/:id', checkPermission('mod_items', 'canEdit'), validateRequest(itemSchema), itemController.updateItem);
+
 router.delete('/items/:id', checkPermission('mod_items', 'canDelete'), itemController.deleteItem);
 
 // Processes
-router.get('/processes', checkPermission('mod_processes', 'canRead'), processController.getProcesses);
-router.post('/processes', checkPermission('mod_processes', 'canCreate'), processController.createProcess);
-router.put('/processes/:id', checkPermission('mod_processes', 'canEdit'), processController.updateProcess);
+router.get('/processes', checkPermission('mod_items', 'canRead'), processController.getProcesses);
+router.post('/processes', checkPermission('mod_items', 'canCreate'), validateRequest(processSchema), processController.createProcess);
+router.put('/processes/:id', checkPermission('mod_items', 'canEdit'), validateRequest(processSchema), processController.updateProcess);
+
 router.delete('/processes/:id', checkPermission('mod_processes', 'canDelete'), processController.deleteProcess);
 
 // Price Fixing
-router.get('/price-fixings', checkPermission('mod_price_fixing', 'canRead'), priceFixingController.getPriceFixings);
-router.post('/price-fixings', checkPermission('mod_price_fixing', 'canCreate'), priceFixingController.createPriceFixing);
-router.put('/price-fixings/:id', checkPermission('mod_price_fixing', 'canEdit'), priceFixingController.updatePriceFixing);
+router.get('/price-fixings', checkPermission('mod_items', 'canRead'), priceFixingController.getPriceFixings);
+router.post('/price-fixings', checkPermission('mod_items', 'canCreate'), validateRequest(priceFixingSchema), priceFixingController.createPriceFixing);
+router.put('/price-fixings/:id', checkPermission('mod_items', 'canEdit'), validateRequest(priceFixingSchema), priceFixingController.updatePriceFixing);
+
 router.delete('/price-fixings/:id', checkPermission('mod_price_fixing', 'canDelete'), priceFixingController.deletePriceFixing);
 
 export default router;

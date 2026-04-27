@@ -113,15 +113,9 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
 
           await (prisma as any).ledgerEntry.create({
              data: {
-<<<<<<< HEAD
                 id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
-                party_id: finalVendorId,
-                party_name: finalVendorName || 'N/A',
-=======
-                id: crypto.randomUUID(),
                 party_id: String(finalVendorId),
                 party_name: String(finalVendorName || 'N/A'),
->>>>>>> 02f3777fc8bd360cdd1b954db5da4bb3f2bd857e
                 party_type: 'vendor',
                 company_id: finalCompanyId ? String(finalCompanyId) : null,
                 date: new Date(),
@@ -231,24 +225,14 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
 
           await (prisma as any).ledgerEntry.create({
              data: {
-<<<<<<< HEAD
                 id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
-                party_id: finalVendorId,
-                party_name: finalVendorName || 'N/A',
-=======
-                id: crypto.randomUUID(),
                 party_id: String(finalVendorId),
                 party_name: String(finalVendorName || 'N/A'),
->>>>>>> 02f3777fc8bd360cdd1b954db5da4bb3f2bd857e
                 party_type: 'vendor',
                 company_id: finalCompanyId ? String(finalCompanyId) : null,
                 date: new Date(),
                 vch_type: 'OUTWARD',
-<<<<<<< HEAD
-                vch_no: finalOutwardNo,
-=======
                 vch_no: String(finalOutwardNo || (entry as any).outward_no || ''),
->>>>>>> 02f3777fc8bd360cdd1b954db5da4bb3f2bd857e
                 type: 'debit',
                 amount: finalAmount,
                 balance: newBalance,

@@ -1,6 +1,9 @@
 import express from 'express';
 import * as storeController from '../controllers/stores/storeController';
 import { authenticate, checkPermission } from '../middleware/authMiddleware';
+import { validateRequest } from '../middleware/validationMiddleware';
+import { storeSchema, storeVisitSchema } from '../utils/validationSchemas';
+
 
 const router = express.Router();
 
@@ -83,19 +86,20 @@ const router = express.Router();
 router.get('/', authenticate, checkPermission('mod_stores', 'canRead'), storeController.getAllStores);
 
 // Create a new store (shop profile)
-router.post('/', authenticate, checkPermission('mod_stores', 'canCreate'), storeController.createStore);
+router.post('/', authenticate, checkPermission('mod_stores', 'canCreate'), validateRequest(storeSchema), storeController.createStore);
 
 // Get a single store by ID
 router.get('/:id', authenticate, checkPermission('mod_stores', 'canRead'), storeController.getStoreById);
 
 // Update store details
-router.put('/:id', authenticate, checkPermission('mod_stores', 'canEdit'), storeController.updateStore);
+router.put('/:id', authenticate, checkPermission('mod_stores', 'canEdit'), validateRequest(storeSchema), storeController.updateStore);
 
 // Log a visit to a store
-router.post('/visit', authenticate, checkPermission('mod_stores', 'canCreate'), storeController.addStoreLog);
+router.post('/visit', authenticate, checkPermission('mod_stores', 'canCreate'), validateRequest(storeVisitSchema), storeController.addStoreLog);
 
 // Update a visit log
-router.put('/visit/:id', authenticate, checkPermission('mod_stores', 'canEdit'), storeController.updateStoreVisit);
+router.put('/visit/:id', authenticate, checkPermission('mod_stores', 'canEdit'), validateRequest(storeVisitSchema), storeController.updateStoreVisit);
+
 
 // Delete a visit log
 router.delete('/visit/:id', authenticate, checkPermission('mod_stores', 'canDelete'), storeController.deleteStoreVisit);

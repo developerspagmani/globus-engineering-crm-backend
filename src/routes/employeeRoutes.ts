@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import * as employeeController from '../controllers/employee/employeeController';
 import { checkPermission } from '../middleware/authMiddleware';
+import { validateRequest } from '../middleware/validationMiddleware';
+import { employeeSchema } from '../utils/validationSchemas';
+
+
 
 const router = Router();
 
@@ -57,8 +61,9 @@ const router = Router();
  *     responses: { 200: { description: Deleted } }
  */
 router.get('/employees', checkPermission('mod_employee', 'canRead') as any, employeeController.getAllEmployees);
-router.post('/employees', checkPermission('mod_employee', 'canCreate') as any, employeeController.createEmployee);
-router.put('/employees/:id', checkPermission('mod_employee', 'canEdit') as any, employeeController.updateEmployee);
+router.post('/employees', checkPermission('mod_employee', 'canCreate') as any, validateRequest(employeeSchema) as any, employeeController.createEmployee);
+router.put('/employees/:id', checkPermission('mod_employee', 'canEdit') as any, validateRequest(employeeSchema) as any, employeeController.updateEmployee);
+
 router.delete('/employees/:id', checkPermission('mod_employee', 'canDelete') as any, employeeController.deleteEmployee);
 
 export default router;

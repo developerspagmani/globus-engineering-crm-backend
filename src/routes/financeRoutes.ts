@@ -9,6 +9,8 @@ import * as gstController from '../controllers/finance/gstController';
 import * as statsController from '../controllers/finance/statsController';
 import * as auditController from '../controllers/system/auditController';
 import { checkPermission, authorize } from '../middleware/authMiddleware';
+import { validateRequest } from '../middleware/validationMiddleware';
+import { customerSchema, vendorSchema, invoiceSchema, voucherSchema, challanSchema } from '../utils/validationSchemas';
 
 const router = Router();
 
@@ -66,8 +68,9 @@ router.get('/finance/stats', checkPermission('mod_invoice', 'canRead') as any, s
  */
 router.get('/invoices', checkPermission('mod_invoice', 'canRead') as any, invoiceController.getAllInvoices);
 router.get('/invoices/next-numbers', checkPermission('mod_invoice', 'canRead') as any, invoiceController.getNextNumbers);
-router.post('/invoices', checkPermission('mod_invoice', 'canCreate') as any, invoiceController.createInvoice);
-router.put('/invoices/:id', checkPermission('mod_invoice', 'canEdit') as any, invoiceController.updateInvoice);
+router.post('/invoices', checkPermission('mod_invoice', 'canCreate') as any, validateRequest(invoiceSchema) as any, invoiceController.createInvoice);
+router.put('/invoices/:id', checkPermission('mod_invoice', 'canEdit') as any, validateRequest(invoiceSchema) as any, invoiceController.updateInvoice);
+
 router.delete('/invoices/:id', checkPermission('mod_invoice', 'canDelete') as any, invoiceController.deleteInvoice);
 
 /**
@@ -92,8 +95,9 @@ router.delete('/invoices/:id', checkPermission('mod_invoice', 'canDelete') as an
  *       200: { description: List of customers }
  */
 router.get('/customers', checkPermission('mod_customer', 'canRead') as any, customerController.getAllCustomers);
-router.post('/customers', checkPermission('mod_customer', 'canCreate') as any, customerController.createCustomer);
-router.put('/customers/:id', checkPermission('mod_customer', 'canEdit') as any, customerController.updateCustomer);
+router.post('/customers', checkPermission('mod_customer', 'canCreate') as any, validateRequest(customerSchema) as any, customerController.createCustomer);
+router.put('/customers/:id', checkPermission('mod_customer', 'canEdit') as any, validateRequest(customerSchema) as any, customerController.updateCustomer);
+
 router.delete('/customers/:id', checkPermission('mod_customer', 'canDelete') as any, customerController.deleteCustomer);
 
 /**
@@ -123,8 +127,9 @@ router.delete('/customers/:id', checkPermission('mod_customer', 'canDelete') as 
  *       201: { description: Created }
  */
 router.get('/vendors', authorize(['super_admin', 'company_admin']) as any, vendorController.getAllVendors);
-router.post('/vendors', authorize(['super_admin', 'company_admin']) as any, vendorController.createVendor);
-router.put('/vendors/:id', authorize(['super_admin', 'company_admin']) as any, vendorController.updateVendor);
+router.post('/vendors', authorize(['super_admin', 'company_admin']) as any, validateRequest(vendorSchema) as any, vendorController.createVendor);
+router.put('/vendors/:id', authorize(['super_admin', 'company_admin']) as any, validateRequest(vendorSchema) as any, vendorController.updateVendor);
+
 router.delete('/vendors/:id', authorize(['super_admin', 'company_admin']) as any, vendorController.deleteVendor);
 
 /**
@@ -150,9 +155,10 @@ router.delete('/vendors/:id', authorize(['super_admin', 'company_admin']) as any
  *       201: { description: Created }
  */
 router.get('/vouchers', checkPermission('mod_voucher', 'canRead') as any, voucherController.getAllVouchers);
-router.post('/vouchers', checkPermission('mod_voucher', 'canCreate') as any, voucherController.createVoucher);
-router.put('/vouchers/:id', checkPermission('mod_voucher', 'canEdit') as any, voucherController.updateVoucher);
+router.post('/vouchers', checkPermission('mod_voucher', 'canCreate') as any, validateRequest(voucherSchema) as any, voucherController.createVoucher);
+router.put('/vouchers/:id', checkPermission('mod_voucher', 'canEdit') as any, validateRequest(voucherSchema) as any, voucherController.updateVoucher);
 router.delete('/vouchers/:id', checkPermission('mod_voucher', 'canDelete') as any, voucherController.deleteVoucher);
+
 
 /**
  * @openapi
@@ -193,9 +199,10 @@ router.post('/ledger', checkPermission('mod_ledger', 'canCreate') as any, ledger
  *       201: { description: Created }
  */
 router.get('/challans', checkPermission('mod_challan', 'canRead') as any, challanController.getAllChallans);
-router.post('/challans', checkPermission('mod_challan', 'canCreate') as any, challanController.createChallan);
-router.put('/challans/:id', checkPermission('mod_challan', 'canEdit') as any, challanController.updateChallan);
+router.post('/challans', checkPermission('mod_challan', 'canCreate') as any, validateRequest(challanSchema) as any, challanController.createChallan);
+router.put('/challans/:id', checkPermission('mod_challan', 'canEdit') as any, validateRequest(challanSchema) as any, challanController.updateChallan);
 router.delete('/challans/:id', checkPermission('mod_challan', 'canDelete') as any, challanController.deleteChallan);
+
 
 /**
  * @openapi
