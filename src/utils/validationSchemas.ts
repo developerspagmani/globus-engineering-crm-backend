@@ -17,8 +17,8 @@ export const PHONE_REGEX = /^\d{10}$/; // Exactly 10 digits
 
 export const customerSchema: Schema = {
   name: { required: true, message: 'Customer Name is required' },
-  email: { required: true, type: 'email', message: 'Valid Email is required' },
-  phone: { required: true, type: 'phone', message: 'Valid 10-digit Phone Number is required' },
+  email: { required: true, message: 'Email is required' },
+  phone: { required: true, message: 'Phone Number is required' },
   street1: { required: true, message: 'Address (Street 1) is required' },
   city: { required: true, message: 'City is required' },
   state: { required: true, message: 'State is required' },
@@ -26,22 +26,22 @@ export const customerSchema: Schema = {
   stateCode: { required: true, message: 'State Code is required' },
   gst: { required: true, message: 'GST Number is required' },
   contactPerson1: { required: true, message: 'Contact Person 1 is required' },
-  emailId1: { required: true, type: 'email', message: 'Contact Person Email 1 is required' },
-  phoneNumber1: { required: true, type: 'phone', message: 'Contact Person Phone 1 is required' },
+  emailId1: { required: true, message: 'Contact Person Email 1 is required' },
+  phoneNumber1: { required: true, message: 'Contact Person Phone 1 is required' },
 };
 
 
 export const vendorSchema: Schema = {
   name: { required: true, message: 'Vendor Name is required' },
-  email: { required: true, type: 'email', message: 'Valid Email is required' },
-  phone: { required: true, type: 'phone', message: 'Valid 10-digit Phone Number is required' },
+  email: { required: true, message: 'Email is required' },
+  phone: { required: true, message: 'Phone Number is required' },
   street1: { required: true, message: 'Address (Street 1) is required' },
   city: { required: true, message: 'City is required' },
   state: { required: true, message: 'State is required' },
   gst: { required: true, message: 'GST Number is required' },
   contactPerson1: { required: true, message: 'Contact Person 1 is required' },
-  emailId1: { required: true, type: 'email', message: 'Contact Person Email 1 is required' },
-  phoneNumber1: { required: true, type: 'phone', message: 'Contact Person Phone 1 is required' },
+  emailId1: { required: true, message: 'Contact Person Email 1 is required' },
+  phoneNumber1: { required: true, message: 'Contact Person Phone 1 is required' },
 };
 
 
@@ -90,8 +90,8 @@ export const itemSchema: Schema = {
 
 export const employeeSchema: Schema = {
   name: { required: true, message: 'Full Name is required' },
-  email: { required: true, type: 'email', message: 'Valid Email is required' },
-  phone: { required: true, type: 'phone', message: 'Valid 10-digit Phone is required' },
+  email: { required: true, message: 'Email is required' },
+  phone: { required: true, message: 'Phone is required' },
   designation: { required: true, message: 'Designation is required' },
   salary: { required: true, type: 'number', message: 'Salary is required' },
   joiningDate: { required: true, type: 'date', message: 'Joining Date is required' },
@@ -105,8 +105,8 @@ export const processSchema: Schema = {
 export const leadSchema: Schema = {
   name: { required: true, message: 'Prospect Name is required' },
   company: { required: true, message: 'Company Name is required' },
-  email: { required: true, type: 'email', message: 'Valid Email is required' },
-  phone: { required: true, type: 'phone', message: 'Valid 10-digit Phone is required' },
+  email: { required: true, message: 'Email is required' },
+  phone: { required: true, message: 'Phone is required' },
   assigned_area: { required: true, message: 'Geographic Area is required' },
 };
 
@@ -121,7 +121,7 @@ export const priceFixingSchema: Schema = {
 export const storeSchema: Schema = {
   name: { required: true, message: 'Store Name is required' },
   owner_name: { required: true, message: 'Owner Name is required' },
-  phone: { required: true, type: 'phone', message: '10-digit Phone is required' },
+  phone: { required: true, message: 'Phone is required' },
   address: { required: true, message: 'Address is required' },
 };
 
