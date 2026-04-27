@@ -43,21 +43,30 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   } = req.body;
   const user = req.user;
   
-  const finalOutwardNo = outward_no || outwardNo;
-  const finalPartyType = party_type || partyType || 'customer';
-  const finalCustomerId = customer_id || customerId;
-  const finalCustomerName = customer_name || customerName;
-  const finalVendorId = vendor_id || vendorId;
-  const finalVendorName = vendor_name || vendorName;
-  const finalProcessName = process_name || processName;
+  const finalOutwardNo = String(outward_no || outwardNo || '');
+  const finalPartyType = String(party_type || partyType || 'customer');
+  const finalCustomerId = String(customer_id || customerId || '');
+  const finalCustomerName = String(customer_name || customerName || '');
+  const finalVendorId = String(vendor_id || vendorId || '');
+  const finalVendorName = String(vendor_name || vendorName || '');
+  const finalProcessName = String(process_name || processName || '');
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : user?.company_id;
-  const finalInwardId = inward_id || inwardId;
-  const finalInwardNo = inward_no || inwardNo;
+  const finalInwardId = String(inward_id || inwardId || '');
+  const finalInwardNo = String(inward_no || inwardNo || '');
+
+  // Sanitize numeric amount to prevent NaN
+  const rawAmount = req.body.amount || 0;
+  const finalAmount = isNaN(parseFloat(String(rawAmount))) ? 0 : parseFloat(String(rawAmount));
 
   try {
-    const entry = await (prisma.outwardEntry as any).create({
+    // Explicitly check if the model exists to avoid "undefined" crashes
+    if (!(prisma as any).outwardEntry) {
+      throw new Error("Prisma model 'outwardEntry' is not initialized in the client.");
+    }
+
+    const entry = await (prisma as any).outwardEntry.create({
       data: {
-        id: crypto.randomUUID(),
+        id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
         outward_no: finalOutwardNo,
         party_type: finalPartyType,
         customer_id: finalCustomerId,
@@ -70,45 +79,41 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
         vehicle_no: String(vehicle_no || vehicleNo || ''),
         driver_name: String(driver_name || driverName || ''),
         notes: String(notes || ''),
-        company_id: finalCompanyId,
-        inward_id: String(finalInwardId || ''),
-        inward_no: String(finalInwardNo || ''),
+        company_id: finalCompanyId ? String(finalCompanyId) : null,
+        inward_id: finalInwardId,
+        inward_no: finalInwardNo,
         status: status || 'completed',
-        amount: parseFloat(String(req.body.amount || '0')),
+        amount: finalAmount,
         items_json: JSON.stringify(items || []),
         date: new Date()
       }
     });
 
     // 2. AUTOMATIC LEDGER ENTRY FOR VENDOR JOB WORK
-    if (finalPartyType.toLowerCase() === 'vendor' && finalVendorId) {
-       const jobValue = parseFloat(String(req.body.amount || '0'));
-       if (jobValue > 0) {
+    if (finalPartyType.toLowerCase() === 'vendor' && finalVendorId && finalVendorId !== 'undefined' && finalVendorId !== '') {
+       if (finalAmount > 0) {
           // Find last balance for the vendor
-          const lastLedger = await prisma.ledgerEntry.findFirst({
-             where: { party_id: String(finalVendorId), company_id: finalCompanyId },
+          const lastLedger = await (prisma as any).ledgerEntry.findFirst({
+             where: { party_id: finalVendorId, company_id: finalCompanyId ? String(finalCompanyId) : undefined },
              orderBy: { created_at: 'desc' }
           });
-          const lastBalance = lastLedger ? parseFloat(String((lastLedger as any).balance || '0')) : 0;
-          
-          // Vendor Ledger (Liability): Balance = Old + Credit - Debit
-          // Sending goods to vendor is a DEBIT (reduces our liability or records their possession)
-          const newBalance = lastBalance - jobValue;
+          const lastBalance = lastLedger ? parseFloat(String(lastLedger.balance || '0')) : 0;
+          const newBalance = (isNaN(lastBalance) ? 0 : lastBalance) - finalAmount;
 
-          const totalQty = JSON.parse(entry.items_json || '[]').reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
+          const totalQty = (items || []).reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
 
-          await (prisma.ledgerEntry as any).create({
+          await (prisma as any).ledgerEntry.create({
              data: {
-                id: crypto.randomUUID(),
-                party_id: String(finalVendorId),
+                id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
+                party_id: finalVendorId,
                 party_name: finalVendorName || 'N/A',
                 party_type: 'vendor',
-                company_id: finalCompanyId,
+                company_id: finalCompanyId ? String(finalCompanyId) : null,
                 date: new Date(),
                 vch_type: 'OUTWARD',
                 vch_no: finalOutwardNo,
                 type: 'debit',
-                amount: jobValue,
+                amount: finalAmount,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
                 reference_id: entry.id
@@ -122,7 +127,12 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
       items: JSON.parse((entry as any).items_json || '[]')
     });
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to create outward entry', detail: error.message });
+    console.error('CREATE_OUTWARD_ERROR:', error);
+    res.status(500).json({ 
+      error: 'Failed to create outward entry', 
+      detail: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };
 
@@ -143,76 +153,79 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
     notes, status, items 
   } = req.body;
 
-  const finalOutwardNo = outward_no || outwardNo;
-  const finalPartyType = party_type || partyType;
-  const finalVendorId = vendor_id || vendorId;
-  const finalVendorName = vendor_name || vendorName;
-  const finalProcessName = process_name || processName;
+  const finalOutwardNo = String(outward_no || outwardNo || '');
+  const finalPartyType = String(party_type || partyType || 'customer');
+  const finalVendorId = String(vendor_id || vendorId || '');
+  const finalVendorName = String(vendor_name || vendorName || '');
+  const finalProcessName = String(process_name || processName || '');
+
+  // Sanitize numeric amount
+  const rawAmount = req.body.amount || 0;
+  const finalAmount = isNaN(parseFloat(String(rawAmount))) ? 0 : parseFloat(String(rawAmount));
 
   try {
-    const entry = await (prisma.outwardEntry as any).update({
+    const entry = await (prisma as any).outwardEntry.update({
       where: { id: String(id) },
       data: {
-        outward_no,
-        party_type,
-        customer_id,
-        customer_name,
-        vendor_id,
-        vendor_name,
-        process_name,
-        invoice_reference,
-        challan_no,
-        vehicle_no,
-        driver_name,
-        notes,
-        status,
+        outward_no: finalOutwardNo,
+        party_type: finalPartyType,
+        customer_id: String(customer_id || customerId || ''),
+        customer_name: String(customer_name || customerName || ''),
+        vendor_id: finalVendorId,
+        vendor_name: finalVendorName,
+        process_name: finalProcessName,
+        invoice_reference: String(invoice_reference || invoiceReference || ''),
+        challan_no: String(challan_no || challanNo || ''),
+        vehicle_no: String(vehicle_no || vehicleNo || ''),
+        driver_name: String(driver_name || driverName || ''),
+        notes: String(notes || ''),
+        status: status,
         items_json: items ? JSON.stringify(items) : undefined,
-        amount: parseFloat(String(req.body.amount || 0)),
+        amount: finalAmount,
       }
     });
 
     // 2. AUTOMATIC LEDGER SYNC FOR UPDATE
-    const jobValue = parseFloat(String(req.body.amount || '0'));
     const user = req.user;
     const finalCompanyId = user?.company_id || entry.company_id;
 
-    if ((finalPartyType || 'customer').toLowerCase() === 'vendor' && finalVendorId && jobValue > 0) {
-       const existingLedger = await (prisma.ledgerEntry as any).findFirst({
+    if (finalPartyType.toLowerCase() === 'vendor' && finalVendorId && finalVendorId !== 'undefined' && finalAmount > 0) {
+       const existingLedger = await (prisma as any).ledgerEntry.findFirst({
           where: { reference_id: String(entry.id) }
        });
 
-       const totalQty = JSON.parse(entry.items_json || '[]').reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
+       const totalQty = (items || JSON.parse(entry.items_json || '[]')).reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
 
        if (existingLedger) {
-          await (prisma.ledgerEntry as any).update({
+          await (prisma as any).ledgerEntry.update({
              where: { id: existingLedger.id },
              data: {
-                amount: jobValue,
-                vch_no: finalOutwardNo || String((entry as any).outward_no || ''),
+                amount: finalAmount,
+                vch_no: finalOutwardNo,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`
              }
           });
        } else {
           // Create new ledger entry if missing
-          const lastLedger = await (prisma.ledgerEntry as any).findFirst({
-             where: { party_id: String(finalVendorId), company_id: finalCompanyId },
+          const lastLedger = await (prisma as any).ledgerEntry.findFirst({
+             where: { party_id: finalVendorId, company_id: finalCompanyId ? String(finalCompanyId) : undefined },
              orderBy: { created_at: 'desc' }
           });
-          const lastBalance = lastLedger ? (lastLedger.balance || 0) : 0;
-          const newBalance = lastBalance - jobValue;
+          const lastBalance = lastLedger ? parseFloat(String(lastLedger.balance || '0')) : 0;
+          const newBalance = (isNaN(lastBalance) ? 0 : lastBalance) - finalAmount;
 
-          await (prisma.ledgerEntry as any).create({
+          await (prisma as any).ledgerEntry.create({
              data: {
-                id: crypto.randomUUID(),
-                party_id: String(finalVendorId),
+                id: crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex'),
+                party_id: finalVendorId,
                 party_name: finalVendorName || 'N/A',
                 party_type: 'vendor',
-                company_id: finalCompanyId,
+                company_id: finalCompanyId ? String(finalCompanyId) : null,
                 date: new Date(),
                 vch_type: 'OUTWARD',
-                vch_no: finalOutwardNo || String((entry as any).outward_no || ''),
+                vch_no: finalOutwardNo,
                 type: 'debit',
-                amount: jobValue,
+                amount: finalAmount,
                 balance: newBalance,
                 description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
                 reference_id: entry.id
@@ -226,6 +239,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
       items: JSON.parse((entry as any).items_json || '[]')
     });
   } catch (error: any) {
+    console.error('UPDATE_OUTWARD_ERROR:', error);
     res.status(500).json({ error: 'Failed to update outward entry', detail: error.message });
   }
 };
