@@ -4,14 +4,22 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 
 export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
-  const queryCompanyId = req.query.companyId as string;
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
-  const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
+  const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
   try {
     const entries = await prisma.outwardEntry.findMany({
-      where: companyId ? { company_id: String(companyId) } : {},
-      orderBy: { created_at: 'desc' }
+      where: companyId ? { 
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() }
+        ]
+      } : {},
+      orderBy: [
+        { date: 'desc' },
+        { created_at: 'desc' }
+      ]
     });
     
     const parsedEntries = entries.map((e: any) => ({
