@@ -19,7 +19,10 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
           { company_id: String(companyId).toLowerCase() }
         ]
       } : {},
-      orderBy: { invoice_date: 'desc' }
+      orderBy: [
+        { invoice_date: 'desc' },
+        { id: 'desc' }
+      ]
     });
 
     const parsedInvoices = invoices.map((inv: any) => {
