@@ -199,7 +199,7 @@ export const processEmailReminders = async (req: Request, res: Response) => {
               amount: it.total || 0
             })),
             subTotal: parseFloat(invoice.total || '0'),
-            taxTotal: parseFloat(invoice.tax_total || '0'),
+            taxTotal: Number(invoice.tax_total || 0),
             grandTotal: parseFloat(invoice.grand_total || '0'),
             companyName: 'Globus Engineering Tools',
             companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
@@ -376,7 +376,7 @@ export const sendTestEmail8840 = async (req: Request, res: Response) => {
         hsn: it.hsn || '84661010'
       })),
       subTotal: parseFloat(invoice.total || '0'),
-      taxTotal: parseFloat(invoice.tax_total || '0'),
+      taxTotal: Number(invoice.tax_total || 0),
       grandTotal: parseFloat(invoice.grand_total || '0'),
       companyName: 'Globus Engineering Tools',
       companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
