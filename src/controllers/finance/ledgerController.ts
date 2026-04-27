@@ -22,8 +22,8 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
         ]
       },
       orderBy: [
-        { date: 'asc' },
-        { created_at: 'asc' }
+        { date: 'desc' },
+        { created_at: 'desc' }
       ]
     });
     res.json(entries);
