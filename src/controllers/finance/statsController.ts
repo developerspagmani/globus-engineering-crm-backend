@@ -7,7 +7,7 @@ import { AuthRequest } from '../../middleware/authMiddleware';
  */
 export const getFinanceStats = async (req: AuthRequest, res: Response) => {
   const companyId = req.user?.company_id;
-  
+
   if (!companyId) {
     return res.status(400).json({ error: 'Company ID is required for dashboard statistics.' });
   }
@@ -17,9 +17,9 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
     const [invoices, customerCount, vendorCount, latestInvoices, latestInwards] = await Promise.all([
       prisma.legacyInvoice.findMany({
         where: { company_id: companyId },
-        select: { 
-          grand_total: true, 
-          paid_amount: true, 
+        select: {
+          grand_total: true,
+          paid_amount: true,
           status: true,
           due_date: true,
           invoice_no: true,
@@ -66,7 +66,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
     let totalPaid = 0;
     let overdueCount = 0;
     const overdueInvoices: any[] = [];
-    
+
     const today = new Date();
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(today.getDate() - 30);
@@ -75,7 +75,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       // Safely parse decimals from strings
       const grandTotal = parseFloat(inv.grand_total || '0') || 0;
       const paidAmount = parseFloat(inv.paid_amount || '0') || 0;
-      
+
       totalInvoiced += grandTotal;
       totalPaid += paidAmount;
 
@@ -112,19 +112,19 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
 
   } catch (error: any) {
     console.error('DASHBOARD STATS ERROR:', error);
-    
+
     // Handle Connection Failures (P1001) specifically for Hostinger Remote MySQL
     if (error.code === 'P1001') {
-      return res.status(503).json({ 
-        error: 'Database Connection Error', 
+      return res.status(503).json({
+        error: 'Database Connection Error',
         detail: 'The backend cannot reach the Hostinger MySQL server. Please ensure your current IP is whitelisted in Hostinger Remote MySQL settings.',
         host: 'srv1214.hstgr.io'
       });
     }
 
-    res.status(500).json({ 
-      error: 'Failed to aggregate dashboard data', 
-      detail: error.message 
+    res.status(500).json({
+      error: 'Failed to aggregate dashboard data',
+      detail: error.message
     });
   }
 };

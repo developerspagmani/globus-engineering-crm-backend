@@ -10,63 +10,87 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
   try {
     const entries = await prisma.inwardEntry.findMany({
-      where: companyId ? { company_id: String(companyId) } : {},
+      where: companyId ? {
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() },
+          { company_id: String(companyId).toUpperCase() }
+        ]
+      } : {},
       orderBy: [
         { date: 'desc' },
         { created_at: 'desc' }
       ]
     });
-    
+
     // Fetch all related invoices and outwards to calculate balances in bulk
     const inwardIds = entries.map(e => e.id);
     const invoices = await (prisma as any).legacyInvoice.findMany({
-        where: { inward_id: { in: inwardIds } }
+      where: { inward_id: { in: inwardIds } }
     });
     const outwards = await prisma.outwardEntry.findMany({
-        where: { inward_id: { in: inwardIds } }
+      where: { inward_id: { in: inwardIds } }
+    });
+
+    // Pre-group invoices and outwards for O(1) lookup speed
+    const invoiceGroups = new Map<string, any[]>();
+    invoices.forEach((inv: any) => {
+      const gid = String(inv.inward_id);
+      if (!invoiceGroups.has(gid)) invoiceGroups.set(gid, []);
+      invoiceGroups.get(gid)!.push(inv);
+    });
+
+    const outwardGroups = new Map<string, any[]>();
+    outwards.forEach((ow: any) => {
+      const gid = String(ow.inward_id);
+      if (!outwardGroups.has(gid)) outwardGroups.set(gid, []);
+      outwardGroups.get(gid)!.push(ow);
     });
 
     const parsedEntries = entries.map((e: any) => {
       const items = JSON.parse(e.items_json || '[]');
-      
+      const invoicedForThisEntry = invoiceGroups.get(String(e.id)) || [];
+      const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
+
       const balanceItems = items.map((item: any) => {
         let totalDeducted = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
 
-        // 1. Deduct from Invoices
-        invoices.filter((inv: any) => inv.inward_id === e.id).forEach((inv: any) => {
-            const invItems = JSON.parse(inv.items_json || '[]');
-            const matching = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
-            if (matching) {
-                const q = parseFloat(matching.quantity || matching.qty || '0');
-                const w = parseFloat(matching.wopQty || matching.wop_qty || '0');
-                totalDeducted += (q + w);
-            }
+        // Add Invoiced quantities
+        invoicedForThisEntry.forEach((inv: any) => {
+          const invItems = JSON.parse(inv.items_json || '[]');
+          const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
+          if (matchingItem) {
+            totalDeducted += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
+          }
         });
 
-        // 2. Deduct from Outwards (Dispatches to Vendors)
-        outwards.filter((out: any) => out.inward_id === e.id).forEach((out: any) => {
-            const outItems = JSON.parse(out.items_json || '[]');
-            const matching = outItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
-            if (matching) totalDeducted += parseFloat(matching.quantity || matching.qty || '0');
+        // Add Outward quantities
+        outwardsForThisEntry.forEach((ow: any) => {
+          const owItems = JSON.parse(ow.items_json || '[]');
+          const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
+          if (matchingItem) {
+            totalDeducted += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+          }
         });
 
         const originalQty = parseFloat(item.quantity || item.qty || '0');
         return {
-            ...item,
-            originalQty,
-            deductedQty: totalDeducted,
-            remainingQty: Math.max(0, originalQty - totalDeducted)
+          ...item,
+          originalQty,
+          deductedQty: totalDeducted,
+          remainingQty: Math.max(0, originalQty - totalDeducted)
         };
       });
 
       return {
         ...e,
+        customerName: e.customer_name, // Use the repaired column
         items: balanceItems,
         totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0)
       };
     });
-    
+
     res.json(parsedEntries);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch inward entries with balance', detail: error.message });
@@ -74,9 +98,9 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 };
 
 export const createInwardEntry = async (req: AuthRequest, res: Response) => {
-  const { 
-    inward_no, customer_id, customer_name, address, vendor_id, vendor_name, 
-    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items, company_id, companyId 
+  const {
+    inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
+    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items, company_id, companyId
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
@@ -116,9 +140,9 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
 
 export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { 
-    inward_no, customer_id, customer_name, address, vendor_id, vendor_name, 
-    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items 
+  const {
+    inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
+    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items
   } = req.body;
 
   try {
@@ -175,10 +199,21 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     // 1. Get all inwards for this customer (Temporary broad search for debugging)
     const inwards = await prisma.inwardEntry.findMany({
       where: {
-        OR: [
-          { customer_id: { contains: String(customerId) } },
-          { customer_name: { contains: String(customerId) } },
-          { customer_name: { contains: nameToSearch } }
+        AND: [
+          {
+            OR: [
+              { company_id: String(companyId) },
+              { company_id: String(companyId).toLowerCase() },
+              { company_id: String(companyId).toUpperCase() }
+            ]
+          },
+          {
+            OR: [
+              { customer_id: { contains: String(customerId) } },
+              { customer_name: { contains: String(customerId) } },
+              { customer_name: { contains: nameToSearch } }
+            ]
+          }
         ]
       }
     });
@@ -191,7 +226,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         inward_id: { in: inwards.map(i => i.id) }
       }
     });
-    
+
     // 3. Get all related outwards to calculate what's at vendors
     const relatedOutwards = await prisma.outwardEntry.findMany({
       where: {
@@ -199,17 +234,30 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       }
     });
 
-    // console.log(`[DIAGNOSTIC] Related Invoices found: ${relatedInvoices.length}`);
+    // Pre-group for O(1) lookup
+    const invoiceGroups = new Map<string, any[]>();
+    relatedInvoices.forEach((inv: any) => {
+      const gid = String(inv.inward_id);
+      if (!invoiceGroups.has(gid)) invoiceGroups.set(gid, []);
+      invoiceGroups.get(gid)!.push(inv);
+    });
+
+    const outwardGroups = new Map<string, any[]>();
+    relatedOutwards.forEach((ow: any) => {
+      const gid = String(ow.inward_id);
+      if (!outwardGroups.has(gid)) outwardGroups.set(gid, []);
+      outwardGroups.get(gid)!.push(ow);
+    });
 
     const results = inwards.map(entry => {
       const originalItems = JSON.parse(entry.items_json || '[]');
-      const invoicedForThisEntry = relatedInvoices.filter((inv: any) => inv.inward_id === entry.id);
-      const outwardsForThisEntry = relatedOutwards.filter((ow: any) => ow.inward_id === entry.id);
-      
+      const invoicedForThisEntry = invoiceGroups.get(String(entry.id)) || [];
+      const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
+
       const balanceItems = originalItems.map((item: any) => {
         let totalInvoicedQty = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
-        
+
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
@@ -231,7 +279,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
 
         const original = parseFloat(item.quantity || item.qty || '0');
         const inHouse = original - totalInvoicedQty - totalSentToVendorQty;
-        const rem = Math.max(0, inHouse); 
+        const rem = Math.max(0, inHouse);
 
         return {
           ...item,
@@ -249,6 +297,8 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       return {
         id: entry.id,
         inward_no: entry.inward_no,
+        customerName: entry.customer_name,
+        vendorName: entry.vendor_name,
         date: entry.date,
         po_reference: entry.po_reference,
         po_date: entry.po_date,

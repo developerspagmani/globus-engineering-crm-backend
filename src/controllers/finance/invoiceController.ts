@@ -13,10 +13,11 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
 
   try {
     const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: companyId ? { 
+      where: companyId ? {
         OR: [
           { company_id: String(companyId) },
-          { company_id: String(companyId).toLowerCase() }
+          { company_id: String(companyId).toLowerCase() },
+          { company_id: String(companyId).toUpperCase() }
         ]
       } : {},
       orderBy: [
@@ -81,7 +82,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
   const finalSubTotal = parseFloat(String(subTotal || '0'));
   const finalGrandTotal = parseFloat(String(grandTotal || '0'));
   const finalTaxTotal = finalGrandTotal - finalSubTotal;
-  
+
   const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
 
   const user = req.user;
@@ -242,7 +243,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
   const finalTaxRate = tax_rate || taxRate ? parseFloat(String(tax_rate || taxRate)) : undefined;
   const finalSubTotal = subTotal ? parseFloat(String(subTotal)) : undefined;
   const finalGrandTotal = grandTotal ? parseFloat(String(grandTotal)) : undefined;
-  
+
   let taxUpdate: any = {};
   if (finalGrandTotal !== undefined && finalSubTotal !== undefined) {
     const finalTaxTotal = finalGrandTotal - finalSubTotal;
