@@ -5,6 +5,7 @@ const router = Router();
 
 // Migration Routes
 router.post('/migration/migrate', migrationController.migrateLegacyData as any);
+router.post('/migration/sync-financials', migrationController.syncFinancials as any);
 router.post('/migration/rollback', migrationController.rollbackLegacyMigration as any);
 
 export default router;

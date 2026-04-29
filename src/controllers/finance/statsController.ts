@@ -73,8 +73,8 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
 
     invoices.forEach(inv => {
       // Safely parse decimals from strings
-      const grandTotal = parseFloat(inv.grand_total || '0') || 0;
-      const paidAmount = parseFloat(inv.paid_amount || '0') || 0;
+      const grandTotal = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+      const paidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
 
       totalInvoiced += grandTotal;
       totalPaid += paidAmount;

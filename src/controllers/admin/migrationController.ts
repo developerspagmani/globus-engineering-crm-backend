@@ -9,9 +9,7 @@ export const migrateLegacyData = async (req: Request, res: Response) => {
   console.log('🚀 Starting Optimized Migration for:', companyId);
 
   const results: any = {
-    customers: 0, invoices: 0, items: 0, processes: 0,
-    vendors: 0, inwards: 0, linksUpdated: 0,
-    priceFixings: 0, employees: 0
+    priceFixings: 0, employees: 0, ledgerEntries: 0, vouchers: 0
   };
 
   try {
@@ -278,6 +276,142 @@ export const migrateLegacyData = async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('❌ Migration Error:', error);
     res.status(500).json({ error: 'Migration failed', detail: error.message });
+  }
+};
+
+export const syncFinancials = async (req: Request, res: Response) => {
+  const companyId = 'comp_globus';
+  const startTime = Date.now();
+  console.log('💰 Starting Financial Sync for:', companyId);
+
+  const results = { ledgerEntries: 0, vouchers: 0 };
+
+  try {
+    // 1. Clear existing financials for a clean slate (only those linked to legacy data or company)
+    await prisma.$transaction([
+      (prisma.ledgerEntry as any).deleteMany({ where: { company_id: companyId } }),
+      prisma.voucher.deleteMany({ where: { company_id: companyId } })
+    ]);
+    console.log('🧹 Cleared existing financials');
+
+    // 2. Fetch all invoices for this company, ordered by date to build running balance
+    const invoices = await (prisma as any).legacyInvoice.findMany({
+      where: { company_id: companyId },
+      orderBy: { invoice_date: 'asc' },
+      include: { customer: true }
+    });
+
+    const customerBalances = new Map<number, number>();
+
+    const ledgerEntriesToCreate: any[] = [];
+    const vouchersToCreate: any[] = [];
+
+    for (const inv of invoices) {
+      const cId = inv.customer_id;
+      if (!cId) continue;
+
+      const currentBalance = customerBalances.get(cId) || 0;
+      const amount = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+      const paidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
+      const cName = inv.customer_name || inv.customer?.customer_name || 'Unknown Customer';
+
+      // A. Add Invoice Debit Entry
+      const newBalanceAfterInvoice = currentBalance + amount;
+      customerBalances.set(cId, newBalanceAfterInvoice);
+
+      ledgerEntriesToCreate.push({
+        id: crypto.randomUUID(),
+        party_id: String(cId),
+        party_name: cName,
+        party_type: 'customer',
+        company_id: companyId,
+        date: inv.invoice_date || new Date(),
+        vch_type: 'INVOICE',
+        vch_no: String(inv.invoice_no || inv.id),
+        type: 'debit',
+        amount: amount,
+        balance: newBalanceAfterInvoice,
+        description: `Migrated Invoice: ${inv.invoice_no || inv.id}`,
+        reference_id: String(inv.id),
+        created_at: inv.app_created_at || new Date()
+      });
+
+      // B. Add Payment Credit Entry & Voucher if paid
+      if (paidAmount > 0) {
+        const finalBalance = newBalanceAfterInvoice - paidAmount;
+        customerBalances.set(cId, finalBalance);
+
+        const vchId = crypto.randomUUID();
+        const vchNo = `M-VCH-${inv.id}`;
+
+        vouchersToCreate.push({
+          id: vchId,
+          voucher_no: vchNo,
+          date: inv.voucher_date || inv.invoice_date || new Date(),
+          type: 'receipt',
+          party_id: String(cId),
+          party_name: cName,
+          party_type: 'customer',
+          company_id: companyId,
+          amount: paidAmount,
+          payment_mode: inv.cheque_no ? 'cheque' : 'cash',
+          reference_no: String(inv.invoice_no || inv.id),
+          cheque_no: inv.cheque_no || '',
+          description_: `Migrated Payment for Invoice ${inv.invoice_no || inv.id}`,
+          status: 'posted',
+          created_at: inv.app_created_at || new Date()
+        });
+
+        ledgerEntriesToCreate.push({
+          id: crypto.randomUUID(),
+          party_id: String(cId),
+          party_name: cName,
+          party_type: 'customer',
+          company_id: companyId,
+          date: inv.voucher_date || inv.invoice_date || new Date(),
+          vch_type: 'RECEIPT',
+          vch_no: vchNo,
+          type: 'credit',
+          amount: paidAmount,
+          balance: finalBalance,
+          description: `Migrated Receipt for Inv: ${inv.invoice_no || inv.id}`,
+          reference_id: vchId,
+          created_at: inv.app_created_at || new Date()
+        });
+      }
+    }
+
+    // 3. Bulk Insert
+    if (ledgerEntriesToCreate.length > 0) {
+      console.log(`📦 Inserting ${ledgerEntriesToCreate.length} ledger entries...`);
+      const chunkSize = 500;
+      for (let i = 0; i < ledgerEntriesToCreate.length; i += chunkSize) {
+        await (prisma.ledgerEntry as any).createMany({
+          data: ledgerEntriesToCreate.slice(i, i + chunkSize)
+        });
+      }
+      results.ledgerEntries = ledgerEntriesToCreate.length;
+    }
+
+    if (vouchersToCreate.length > 0) {
+      console.log(`📦 Inserting ${vouchersToCreate.length} vouchers...`);
+      const chunkSize = 500;
+      for (let i = 0; i < vouchersToCreate.length; i += chunkSize) {
+        await prisma.voucher.createMany({
+          data: vouchersToCreate.slice(i, i + chunkSize)
+        });
+      }
+      results.vouchers = vouchersToCreate.length;
+    }
+
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`🏁 Financial sync finished in ${duration} seconds.`);
+
+    res.json({ success: true, message: 'Financial sync completed.', data: results });
+
+  } catch (error: any) {
+    console.error('❌ Sync Error:', error);
+    res.status(500).json({ error: 'Financial sync failed', detail: error.message });
   }
 };
 
