@@ -9,28 +9,60 @@ import crypto from 'crypto';
 
 export const getAllStores = async (req: AuthRequest, res: Response) => {
   const { company_id, role, id: userId, assigned_area } = req.user as any;
-  // console.log('[DEBUG_STORES] User:', { userId, role, assigned_area, company_id });
+  
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const where: any = { company_id };
+    const where: any = {
+      AND: [{ company_id }]
+    };
 
     // If sales staff, only see stores in their area OR assigned to them
     if (role === 'sales') {
-      where.OR = [
-        { assigned_agent_id: userId },
-        { area: assigned_area }
-      ];
+      where.AND.push({
+        OR: [
+          { assigned_agent_id: userId },
+          { area: assigned_area }
+        ]
+      });
     }
 
-    const stores = await prisma.store.findMany({
-      where,
-      orderBy: { created_at: 'desc' },
-      include: {
-        visits: {
-          orderBy: { visit_date: 'desc' },
-          take: 1
+    if (search) {
+      where.AND.push({
+        OR: [
+          { name: { contains: search.toLowerCase() } },
+          { name: { contains: search.toUpperCase() } },
+          { owner_name: { contains: search.toLowerCase() } },
+          { owner_name: { contains: search.toUpperCase() } },
+          { phone: { contains: search.toLowerCase() } },
+          { phone: { contains: search.toUpperCase() } },
+          { area: { contains: search.toLowerCase() } },
+          { area: { contains: search.toUpperCase() } },
+          { city: { contains: search.toLowerCase() } },
+          { city: { contains: search.toUpperCase() } }
+        ]
+      });
+    }
+
+    const [stores, totalCount] = await Promise.all([
+      prisma.store.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' },
+        include: {
+          visits: {
+            orderBy: { visit_date: 'desc' },
+            take: 1
+          }
         }
-      }
-    });
+      }),
+      prisma.store.count({ where })
+    ]);
 
     const formattedStores = stores.map(s => ({
       ...s,
@@ -47,7 +79,16 @@ export const getAllStores = async (req: AuthRequest, res: Response) => {
         createdAt: s.visits[0].created_at
       } : null
     }));
-    res.json(formattedStores);
+
+    res.json({
+      items: formattedStores,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch stores', detail: error.message });
   }

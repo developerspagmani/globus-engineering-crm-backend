@@ -9,17 +9,82 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const vouchers = await prisma.voucher.findMany({
-      where: companyId ? { 
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({
         OR: [
           { company_id: String(companyId) },
           { company_id: String(companyId).toLowerCase() }
         ]
-      } : {},
-      orderBy: { date: 'desc' }
+      });
+    }
+
+    if (search) {
+      where.AND.push({
+        OR: [
+          { voucher_no: { contains: search.toLowerCase() } },
+          { voucher_no: { contains: search.toUpperCase() } },
+          { party_name: { contains: search.toLowerCase() } },
+          { party_name: { contains: search.toUpperCase() } },
+          { reference_no: { contains: search.toLowerCase() } },
+          { reference_no: { contains: search.toUpperCase() } },
+          { description_: { contains: search.toLowerCase() } },
+          { description_: { contains: search.toUpperCase() } }
+        ]
+      });
+    }
+
+    const fromDate = req.query.fromDate as string;
+    const toDate   = req.query.toDate as string;
+    const partyId  = req.query.partyId as string;
+
+    if (fromDate || toDate) {
+      const dateFilter: any = {};
+      if (fromDate) dateFilter.gte = new Date(fromDate);
+      if (toDate)   dateFilter.lte = new Date(toDate);
+      where.AND.push({ date: dateFilter });
+    }
+
+    if (partyId) {
+      where.AND.push({ party_id: String(partyId) });
+    }
+
+    const [vouchers, totalCount, amountRows] = await Promise.all([
+      prisma.voucher.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { date: 'desc' }
+      }),
+      prisma.voucher.count({ where }),
+      prisma.voucher.findMany({ where, select: { amount: true } })
+    ]);
+
+    const totalCollected = amountRows.reduce(
+      (sum: number, v: any) => sum + (parseFloat(String(v.amount || '0')) || 0),
+      0
+    );
+
+    res.json({
+      items: vouchers,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      },
+      aggregates: { totalCollected }
     });
-    res.json(vouchers);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch vouchers', detail: error.message });
   }

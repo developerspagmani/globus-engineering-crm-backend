@@ -8,26 +8,79 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
   const user = req.user;
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const entries = await prisma.outwardEntry.findMany({
-      where: companyId ? { 
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({
         OR: [
           { company_id: String(companyId) },
-          { company_id: String(companyId).toLowerCase() }
+          { company_id: String(companyId).toLowerCase() },
+          { company_id: String(companyId).toUpperCase() }
         ]
-      } : {},
-      orderBy: [
-        { date: 'desc' },
-        { created_at: 'desc' }
-      ]
-    });
+      });
+    }
+
+    if (search) {
+      where.AND.push({
+        OR: [
+          { outward_no: { contains: search } },
+          { customer_name: { contains: search } },
+          { vendor_name: { contains: search } },
+          { challan_no: { contains: search } },
+          { vehicle_no: { contains: search } }
+        ]
+      });
+    }
+
+    const [entries, totalCount] = await Promise.all([
+      prisma.outwardEntry.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          { date: 'desc' },
+          { created_at: 'desc' }
+        ]
+      }),
+      prisma.outwardEntry.count({ where })
+    ]);
     
     const parsedEntries = entries.map((e: any) => ({
       ...e,
+      outwardNo: e.outward_no,
+      partyType: e.party_type,
+      customerName: e.customer_name,
+      vendorName: e.vendor_name,
+      processName: e.process_name,
+      invoiceReference: e.invoice_reference,
+      challanNo: e.challan_no,
+      vehicleNo: e.vehicle_no,
+      driverName: e.driver_name,
+      companyId: e.company_id,
+      inwardId: e.inward_id,
+      inwardNo: e.inward_no,
+      createdAt: e.created_at,
       items: JSON.parse(e.items_json || '[]')
     }));
     
-    res.json(parsedEntries);
+    res.json({
+      items: parsedEntries,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch outward entries', detail: error.message });
   }

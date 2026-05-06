@@ -8,16 +8,48 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
 
   const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
 
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const customers = await prisma.legacyCustomer.findMany({
-      where: companyId ? { 
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({
         OR: [
           { company_id: String(companyId) },
-          { company_id: String(companyId).toLowerCase() }
+          { company_id: String(companyId).toLowerCase() },
+          { company_id: String(companyId).toUpperCase() }
         ]
-      } : {}
-    });
+      });
+    }
 
+    if (search) {
+      where.AND.push({
+        OR: [
+          { customer_name: { contains: search } },
+          { email: { contains: search } },
+          { phone: { contains: search } },
+          { city: { contains: search } },
+          { gst: { contains: search } }
+        ]
+      });
+    }
+
+    const [customers, totalCount] = await Promise.all([
+      prisma.legacyCustomer.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { customer_name: 'asc' }
+      }),
+      prisma.legacyCustomer.count({ where })
+    ]);
 
     const mapped = customers.map(c => ({
       id: c.id.toString(),
@@ -60,7 +92,15 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
       agentId: c.agent_id
     }));
 
-    res.json(mapped);
+    res.json({
+      items: mapped,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch customers', detail: error.message });
   }

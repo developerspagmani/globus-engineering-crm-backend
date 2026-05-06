@@ -8,17 +8,58 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
 
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const challans = await prisma.challan.findMany({
-      where: companyId ? { 
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({
         OR: [
           { company_id: String(companyId) },
           { company_id: String(companyId).toLowerCase() }
         ]
-      } : {},
-      orderBy: { created_at: 'desc' }
+      });
+    }
+
+    if (search) {
+      where.AND.push({
+        OR: [
+          { challan_no: { contains: search.toLowerCase() } },
+          { challan_no: { contains: search.toUpperCase() } },
+          { party_name: { contains: search.toLowerCase() } },
+          { party_name: { contains: search.toUpperCase() } },
+          { vehicle_no: { contains: search.toLowerCase() } },
+          { vehicle_no: { contains: search.toUpperCase() } }
+        ]
+      });
+    }
+
+    const [challans, totalCount] = await Promise.all([
+      prisma.challan.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' }
+      }),
+      prisma.challan.count({ where })
+    ]);
+
+    res.json({
+      items: challans.map((c: any) => ({ ...c, items: JSON.parse(c.items_json || '[]') })),
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
     });
-    res.json(challans.map((c: any) => ({ ...c, items: JSON.parse(c.items_json || '[]') })));
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch challans', detail: error.message });
   }

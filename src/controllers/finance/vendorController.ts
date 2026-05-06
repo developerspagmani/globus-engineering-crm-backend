@@ -8,10 +8,48 @@ export const getAllVendors = async (req: AuthRequest, res: Response) => {
 
   const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
 
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const vendors = await prisma.vendor.findMany({
-      where: (companyId && process.env.AUTH !== 'false') ? { company_id: String(companyId) } : {}
-    });
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId && process.env.AUTH !== 'false') {
+      where.AND.push({
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() },
+          { company_id: String(companyId).toUpperCase() }
+        ]
+      });
+    }
+
+    if (search) {
+      where.AND.push({
+        OR: [
+          { name: { contains: search } },
+          { email_: { contains: search } },
+          { phone: { contains: search } },
+          { company: { contains: search } },
+          { gst: { contains: search } }
+        ]
+      });
+    }
+
+    const [vendors, totalCount] = await Promise.all([
+      prisma.vendor.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { name: 'asc' }
+      }),
+      prisma.vendor.count({ where })
+    ]);
 
     const formattedVendors = vendors.map((v: any) => ({
       id: v.id,
@@ -49,7 +87,15 @@ export const getAllVendors = async (req: AuthRequest, res: Response) => {
       companyId: v.company_id
     }));
 
-    res.json(formattedVendors);
+    res.json({
+      items: formattedVendors,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch vendors', detail: error.message });
   }

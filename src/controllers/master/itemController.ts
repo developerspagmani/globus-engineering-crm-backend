@@ -3,13 +3,58 @@ import prisma from '../../config/prisma';
 import crypto from 'crypto';
 
 export const getItems = async (req: Request, res: Response) => {
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
+
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const companyId = (req.query.companyId || req.query.company_id) as string;
-    const items = await (prisma as any).item.findMany({
-      where: companyId ? { company_id: String(companyId) } : {},
-      orderBy: { created_at: 'desc' },
+    const where: any = {
+      AND: []
+    };
+
+    if (queryCompanyId) {
+      where.AND.push({
+        OR: [
+          { company_id: String(queryCompanyId) },
+          { company_id: String(queryCompanyId).toLowerCase() },
+          { company_id: String(queryCompanyId).toUpperCase() }
+        ]
+      });
+    }
+
+    if (search) {
+      where.AND.push({
+        OR: [
+          { item_name: { contains: search } },
+          { item_code: { contains: search } }
+        ]
+      });
+    }
+
+    const [items, totalCount] = await Promise.all([
+      (prisma as any).item.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { created_at: 'desc' },
+      }),
+      (prisma as any).item.count({ where })
+    ]);
+
+    res.json({
+      success: true,
+      data: items,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
     });
-    res.json({ success: true, data: items });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

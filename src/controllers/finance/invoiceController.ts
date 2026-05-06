@@ -8,27 +8,173 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
   const user = req.user;
 
-  // 1. Determine CompanyID - Support User context AND Direct Query Param (Snake and Camel)
+  // 1. Determine CompanyID
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
+  // 2. Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+
+  const search = (req.query.search as string || '').toLowerCase();
+  const status = req.query.status as string;
+  const fromDate = req.query.fromDate as string;
+  const toDate = req.query.toDate as string;
+  const type = req.query.type as string; // Optional: filter by invoice type (WP, WOP, BOTH)
+
   try {
-    const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: companyId ? {
+    // 3. Build Filter Clause
+    const where: any = {
+      AND: []
+    };
+
+    // Company Filter (Strict)
+    if (companyId) {
+      where.AND.push({
         OR: [
-          { company_id: String(companyId) },
-          { company_id: String(companyId).toLowerCase() },
-          { company_id: String(companyId).toUpperCase() }
+          { company_id: { contains: String(companyId) } },
+          { company_id: { contains: String(companyId).toLowerCase() } },
+          { company_id: { contains: String(companyId).toUpperCase() } },
+          { company_id: String(companyId) }
         ]
-      } : {},
-      orderBy: [
-        { invoice_date: 'desc' },
-        { id: 'desc' }
-      ]
-    });
+      });
+    }
+
+    // Smart Status Filter for "Pending" and "Paid"
+    // Since legacy data might have inconsistent status strings, we calculate based on balance.
+    if (status && status !== 'all') {
+      const statusType = status.toLowerCase();
+      
+      // Fetch IDs for this company to check balances
+      // Broad discovery: Find all IDs with a balance, then let the main 'where' clause filter by company.
+      const allInvoices = await prisma.legacyInvoice.findMany({
+          select: { id: true, grand_total: true, paid_amount: true, status: true }
+      });
+
+      if (statusType === 'pending') {
+          const pendingIds = allInvoices
+              .filter(inv => {
+                  const grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+                  const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
+                  // Strictly balance based: If there is ANY money left to pay, it is pending
+                  return (grand - paid) > 0;
+              })
+              .map(inv => inv.id);
+          where.AND.push({ id: { in: pendingIds } });
+      } else if (statusType === 'paid') {
+          const paidIds = allInvoices
+              .filter(inv => {
+                  if (inv.status === 'PAID' || inv.status === 'COMPLETED') return true;
+                  const grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+                  const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
+                  // Paid if balance is zero (even if grand total is 0)
+                  return (grand - paid) <= 0.1;
+              })
+              .map(inv => inv.id);
+          where.AND.push({ id: { in: paidIds } });
+      } else {
+          where.AND.push({ status: status.toUpperCase() });
+      }
+    }
+
+    // Search Filter (Invoice No, Customer Name, DC No)
+    if (search) {
+      where.AND.push({
+        OR: [
+          { customer_name: { contains: search.toLowerCase() } },
+          { customer_name: { contains: search.toUpperCase() } },
+          { dc_no: { contains: search.toLowerCase() } },
+          { dc_no: { contains: search.toUpperCase() } },
+          // For numeric search on invoice_no
+          ...(!isNaN(parseInt(search)) ? [{ invoice_no: parseInt(search) }] : [])
+        ]
+      });
+    }
+
+    // Type Filter
+    const type = req.query.type as string;
+    if (type && type !== 'all') {
+      const types = type.split(',').map(t => {
+        if (t === 'WOP') return 'without_process';
+        if (t === 'BOTH') return 'both';
+        return 'with_process';
+      });
+      
+      // If filtering for standard invoices, include NULL/Empty as 'with_process'
+      if (types.includes('with_process')) {
+        where.AND.push({
+          OR: [
+            { bill_type: { in: types } },
+            { bill_type: null },
+            { bill_type: '' }
+          ]
+        });
+      } else {
+        where.AND.push({ bill_type: { in: types } });
+      }
+    }
+
+    // Date Range Filter
+    if (fromDate || toDate) {
+      const dateFilter: any = {};
+      if (fromDate) dateFilter.gte = new Date(fromDate);
+      if (toDate) dateFilter.lte = new Date(toDate);
+      where.AND.push({ invoice_date: dateFilter });
+    }
+
+    // 4. Execute Queries (including aggregate sums for header cards)
+    const [invoices, totalCount, sums, rawTotalCount] = await Promise.all([
+      prisma.legacyInvoice.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          { invoice_date: 'desc' },
+          { id: 'desc' }
+        ]
+      }),
+      prisma.legacyInvoice.count({ where }),
+      // Only select the columns needed for header cards
+      prisma.legacyInvoice.findMany({
+        where,
+        select: { total: true, grand_total: true, paid_amount: true, invoice_date: true }
+      }),
+      prisma.legacyInvoice.count() // Absolute total in DB
+    ]);
+
+
+
+    // Compute aggregate totals from ALL matching records (all pages, not just current page)
+    // Derive tax per record as (grand_total - total) — avoids NULL tax_total column on legacy rows
+    const aggregates = sums.reduce(
+      (acc: any, inv: any) => {
+        const taxable = parseFloat(String(inv.total       || '0').replace(/[^\d.]/g, '')) || 0;
+        const grand   = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+        const paid    = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
+        const tax     = grand - taxable;
+        const outstanding = grand - paid;
+
+        // Critical overdue: > 90 days from invoice_date if still outstanding
+        let isCritical = 0;
+        if (outstanding > 0.01 && inv.invoice_date) {
+            const diff = Date.now() - new Date(inv.invoice_date).getTime();
+            if (diff > 90 * 24 * 60 * 60 * 1000) isCritical = 1;
+        }
+
+        return {
+          totalTaxable: acc.totalTaxable + taxable,
+          totalGrand:   acc.totalGrand   + grand,
+          totalTax:     acc.totalTax     + (tax > 0 ? tax : 0),
+          totalOutstanding: acc.totalOutstanding + (outstanding > 0 ? outstanding : 0),
+          criticalOverdue: acc.criticalOverdue + isCritical
+        };
+      },
+      { totalTaxable: 0, totalGrand: 0, totalTax: 0, totalOutstanding: 0, criticalOverdue: 0 }
+    );
 
     const parsedInvoices = invoices.map((inv: any) => {
       const base = { ...inv };
-      const mapped = {
+      return {
         ...base,
         id: inv.id.toString(),
         invoiceNumber: inv.invoice_no?.toString() || inv.id.toString(),
@@ -62,10 +208,18 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         gst2_per: inv.gst2_per,
         igst_per: inv.igst_per
       };
-      return mapped;
     });
 
-    res.json(parsedInvoices);
+    res.json({
+      items: parsedInvoices,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      },
+      aggregates
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch invoices', detail: error.message });
   }
@@ -159,7 +313,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
               id: crypto.randomUUID(),
               challan_no: String(delNo || invNo),
               party_id: String(customerId),
-              party_name: customerName,
+              party_name: String(customerName),
               party_type: 'customer',
               company_id: finalCompanyId,
               date: date ? new Date(date) : new Date(),

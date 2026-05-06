@@ -4,29 +4,106 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 
 export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
-  const { partyId, companyId: queryCompanyId } = req.query;
+  const { partyId, companyId: queryCompanyId, dateFrom, dateTo } = req.query;
   const user = req.user;
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
 
+  // Pagination Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 20;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const entries = await (prisma.ledgerEntry as any).findMany({
-      where: {
-        AND: [
-          companyId ? {
-            OR: [
-              { company_id: String(companyId) },
-              { company_id: String(companyId).toLowerCase() }
-            ]
-          } : {},
-          partyId ? { party_id: String(partyId) } : {}
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({
+        OR: [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() }
         ]
+      });
+    }
+
+    if (partyId) {
+      where.AND.push({ party_id: String(partyId) });
+    }
+
+    // 1. Calculate Opening Balance if dateFrom is provided
+    let openingBalance = 0;
+    if (dateFrom && partyId) {
+      const entriesBefore = await (prisma.ledgerEntry as any).findMany({
+        where: {
+          AND: [
+            { party_id: String(partyId) },
+            companyId ? {
+              OR: [
+                { company_id: String(companyId) },
+                { company_id: String(companyId).toLowerCase() }
+              ]
+            } : {},
+            { date: { lt: new Date(dateFrom as string) } }
+          ]
+        }
+      });
+
+      // Simple sum - logic should match the frontend's isVendor check
+      // However, the backend doesn't always know if it's a vendor or customer here easily without a separate query.
+      // We'll rely on the frontend to interpret the opening balance based on the party type it knows.
+      // Or we can just return the raw credit/debit sums.
+      
+      let totalDr = 0;
+      let totalCr = 0;
+      entriesBefore.forEach((e: any) => {
+        if (e.type === 'debit') totalDr += parseFloat(String(e.amount || 0));
+        else totalCr += parseFloat(String(e.amount || 0));
+      });
+      openingBalance = totalDr - totalCr; // Standard: Debit - Credit
+    }
+
+    // 2. Fetch Entries
+    const entriesWhere: any = { AND: [...where.AND] };
+    if (dateFrom) entriesWhere.AND.push({ date: { gte: new Date(dateFrom as string) } });
+    if (dateTo) entriesWhere.AND.push({ date: { lte: new Date(dateTo as string) } });
+    if (search) {
+      entriesWhere.AND.push({
+        OR: [
+          { vch_no: { contains: search.toLowerCase() } },
+          { vch_no: { contains: search.toUpperCase() } },
+          { description: { contains: search.toLowerCase() } },
+          { description: { contains: search.toUpperCase() } },
+          { vch_type: { contains: search.toLowerCase() } },
+          { vch_type: { contains: search.toUpperCase() } }
+        ]
+      });
+    }
+
+    const [entries, totalCount] = await Promise.all([
+      (prisma.ledgerEntry as any).findMany({
+        where: entriesWhere,
+        skip,
+        take: limit,
+        orderBy: [
+          { date: 'desc' },
+          { created_at: 'desc' }
+        ]
+      }),
+      (prisma.ledgerEntry as any).count({ where: entriesWhere })
+    ]);
+
+    res.json({
+      items: entries,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
       },
-      orderBy: [
-        { date: 'desc' },
-        { created_at: 'desc' }
-      ]
+      openingBalance // Raw Debit - Credit sum
     });
-    res.json(entries);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch ledger entries', detail: error.message });
   }

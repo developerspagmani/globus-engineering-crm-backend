@@ -8,22 +8,65 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
   const user = req.user;
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId);
 
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
+
   try {
-    const entries = await prisma.inwardEntry.findMany({
-      where: companyId ? {
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({
         OR: [
           { company_id: String(companyId) },
           { company_id: String(companyId).toLowerCase() },
           { company_id: String(companyId).toUpperCase() }
         ]
-      } : {},
-      orderBy: [
-        { date: 'desc' },
-        { created_at: 'desc' }
-      ]
-    });
+      });
+    }
 
-    // Fetch all related invoices and outwards to calculate balances in bulk
+    if (search) {
+      where.AND.push({
+        OR: [
+          { inward_no: { contains: search } },
+          { customer_name: { contains: search } },
+          { vendor_name: { contains: search } },
+          { dc_no: { contains: search } },
+          { challan_no: { contains: search } }
+        ]
+      });
+    }
+
+    const status = req.query.status as string;
+    if (status && status !== 'all') {
+      where.AND.push({ status: status });
+    }
+
+    const [entries, totalCount, completedCount, pendingCount, partiesRaw] = await Promise.all([
+      prisma.inwardEntry.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: [
+          { date: 'desc' },
+          { created_at: 'desc' }
+        ]
+      }),
+      prisma.inwardEntry.count({ where }),
+      prisma.inwardEntry.count({ where: { ...where, AND: [...(where.AND || []), { status: 'completed' }] } }),
+      prisma.inwardEntry.count({ where: { ...where, AND: [...(where.AND || []), { status: 'pending' }] } }),
+      prisma.inwardEntry.findMany({
+        where,
+        select: { customer_name: true, vendor_name: true },
+        distinct: ['customer_name']
+      })
+    ]);
+
+    // Fetch related records only for the paginated entries to calculate balances
     const inwardIds = entries.map(e => e.id);
     const invoices = await (prisma as any).legacyInvoice.findMany({
       where: { inward_id: { in: inwardIds } }
@@ -32,7 +75,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       where: { inward_id: { in: inwardIds } }
     });
 
-    // Pre-group invoices and outwards for O(1) lookup speed
+    // Pre-group invoices and outwards
     const invoiceGroups = new Map<string, any[]>();
     invoices.forEach((inv: any) => {
       const gid = String(inv.inward_id);
@@ -85,13 +128,37 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
       return {
         ...e,
-        customerName: e.customer_name, // Use the repaired column
+        customerName: e.customer_name,
+        vendorName: e.vendor_name,
+        inwardNo: e.inward_no,
+        poReference: e.po_reference,
+        poDate: e.po_date,
+        challanNo: e.challan_no,
+        dcNo: e.dc_no,
+        dcDate: e.dc_date,
+        vehicleNo: e.vehicle_no,
+        companyId: e.company_id,
+        dueDate: e.due_date,
+        createdAt: e.created_at,
         items: balanceItems,
         totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0)
       };
     });
 
-    res.json(parsedEntries);
+    res.json({
+      items: parsedEntries,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      },
+      statusCounts: {
+        completed: completedCount,
+        pending: pendingCount,
+        activeParties: partiesRaw.length
+      }
+    });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch inward entries with balance', detail: error.message });
   }

@@ -231,11 +231,11 @@ export const migrateLegacyData = async (req: Request, res: Response) => {
             pricesToCreate.push({
               id: `price_${lp.id}`,
               customer_id: cId,
-              customer_name: cName,
+              customer_name: String(cName),
               item_id: iId,
-              item_name: iName,
+              item_name: String(iName),
               process_id: pId,
-              process_name: pName,
+              process_name: String(pName),
               price: lp.price || 0,
               company_id: companyId
             });

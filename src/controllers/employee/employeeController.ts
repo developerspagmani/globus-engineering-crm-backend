@@ -3,16 +3,60 @@ import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 
 export const getAllEmployees = async (req: AuthRequest, res: Response) => {
-  const queryCompanyId = req.query.companyId as string;
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
 
-  const companyId = user?.role === 'super_admin' ? queryCompanyId : user?.company_id;
+  const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId);
+
+  // Pagination & Filter Params
+  const page = parseInt(req.query.page as string) || 1;
+  const limit = parseInt(req.query.limit as string) || 10;
+  const skip = (page - 1) * limit;
+  const search = (req.query.search as string || '').toLowerCase();
 
   try {
-    const employees = await prisma.legacyEmployee.findMany({
-      where: companyId ? { company_id: String(companyId) } : {}
+    const where: any = {
+      AND: []
+    };
+
+    if (companyId) {
+      where.AND.push({ company_id: String(companyId) });
+    }
+
+    if (search) {
+      where.AND.push({
+        OR: [
+          { ename: { contains: search.toLowerCase() } },
+          { ename: { contains: search.toUpperCase() } },
+          { email: { contains: search.toLowerCase() } },
+          { email: { contains: search.toUpperCase() } },
+          { designation: { contains: search.toLowerCase() } },
+          { designation: { contains: search.toUpperCase() } },
+          { phone_number: { contains: search.toLowerCase() } },
+          { phone_number: { contains: search.toUpperCase() } }
+        ]
+      });
+    }
+
+    const [employees, totalCount] = await Promise.all([
+      prisma.legacyEmployee.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { ename: 'asc' }
+      }),
+      prisma.legacyEmployee.count({ where })
+    ]);
+
+    res.json({
+      items: employees,
+      pagination: {
+        total: totalCount,
+        page,
+        limit,
+        totalPages: Math.ceil(totalCount / limit)
+      }
     });
-    res.json(employees);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch employees', detail: error.message });
   }

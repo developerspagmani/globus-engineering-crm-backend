@@ -309,6 +309,11 @@ Globus Engineering Team
 }
 
 async function sendEmail(to: string, subject: string, body: string, attachments?: any[]): Promise<boolean> {
+  if (!process.env.SMTP_HOST) {
+    console.error('❌ Nodemailer Error: SMTP_HOST is not defined in .env');
+    return false;
+  }
+
   const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: parseInt(process.env.SMTP_PORT || '587'),
@@ -320,6 +325,9 @@ async function sendEmail(to: string, subject: string, body: string, attachments?
   });
 
   try {
+    // Verify connection configuration
+    await transporter.verify();
+
     await transporter.sendMail({
       from: `"${process.env.FROM_NAME || 'Globus Engineering'}" <${process.env.FROM_EMAIL || 'noreply@globusengineering.com'}>`,
       to,
