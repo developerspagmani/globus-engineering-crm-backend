@@ -10,7 +10,14 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
   // Pagination & Filter Params
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const requestedLimit = parseInt(req.query.limit as string);
+  
+  // Selection Mode Expansion: If frontend requests exactly 100 (standard for selection dropdowns/modals),
+  // we expand to 5000 to ensure the user sees all 200+ pending records.
+  let limit = requestedLimit || 10;
+  if (requestedLimit === 100 || req.query.status === 'pending') {
+    limit = 5000;
+  }
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
 
