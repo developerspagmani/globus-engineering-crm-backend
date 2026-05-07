@@ -18,10 +18,12 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       prisma.legacyInvoice.findMany({
         where: { company_id: companyId },
         select: {
+          id: true,
           grand_total: true,
           paid_amount: true,
           status: true,
           due_date: true,
+          invoice_date: true,
           invoice_no: true,
           customer_name: true
         }
@@ -80,17 +82,21 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       totalPaid += paidAmount;
 
       // Check if overdue (> 30 days old and not fully paid)
-      const isUnpaid = paidAmount < (grandTotal - 0.01) && inv.status !== 'PAID';
-      if (isUnpaid && inv.due_date && inv.due_date < thirtyDaysAgo) {
+      const cleanStatus = (inv.status || '').trim().toUpperCase();
+      const isPaidStatus = cleanStatus === 'PAID' || cleanStatus === 'COMPLETED';
+      const isUnpaid = paidAmount < (grandTotal - 0.01) && !isPaidStatus;
+      const dueDate = inv.due_date || inv.invoice_date;
+
+      if (isUnpaid && dueDate && dueDate < thirtyDaysAgo) {
         overdueCount++;
         if (overdueInvoices.length < 10) {
           overdueInvoices.push({
-            id: (inv as any).id,
+            id: inv.id,
             invoice_no: inv.invoice_no,
             customer: inv.customer_name,
             amount: grandTotal,
             pending: Math.max(0, grandTotal - paidAmount),
-            due_date: inv.due_date
+            due_date: dueDate
           });
         }
       }

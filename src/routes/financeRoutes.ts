@@ -193,6 +193,7 @@ router.post('/ledger', checkPermission('mod_ledger', 'canCreate') as any, ledger
  *       201: { description: Created }
  */
 router.get('/challans', checkPermission('mod_challan', 'canRead') as any, challanController.getAllChallans);
+router.get('/challans/:id', checkPermission('mod_challan', 'canRead') as any, challanController.getChallanById);
 router.post('/challans', checkPermission('mod_challan', 'canCreate') as any, challanController.createChallan);
 router.put('/challans/:id', checkPermission('mod_challan', 'canEdit') as any, challanController.updateChallan);
 router.delete('/challans/:id', checkPermission('mod_challan', 'canDelete') as any, challanController.deleteChallan);

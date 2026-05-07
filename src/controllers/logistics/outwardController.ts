@@ -301,3 +301,36 @@ export const deleteOutwardEntry = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to delete outward entry', detail: error.message });
   }
 };
+
+export const getOutwardById = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const entry = await prisma.outwardEntry.findUnique({
+      where: { id: String(id) }
+    });
+
+    if (!entry) {
+      return res.status(404).json({ error: 'Outward entry not found' });
+    }
+
+    res.json({
+      ...entry,
+      outwardNo: entry.outward_no,
+      partyType: entry.party_type,
+      customerName: entry.customer_name,
+      vendorName: entry.vendor_name,
+      processName: entry.process_name,
+      invoiceReference: entry.invoice_reference,
+      challanNo: entry.challan_no,
+      vehicleNo: entry.vehicle_no,
+      driverName: entry.driver_name,
+      companyId: entry.company_id,
+      inwardId: entry.inward_id,
+      inwardNo: entry.inward_no,
+      createdAt: entry.created_at,
+      items: JSON.parse(entry.items_json || '[]')
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch outward entry details', detail: error.message });
+  }
+};

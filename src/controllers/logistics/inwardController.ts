@@ -394,3 +394,78 @@ export const deleteInwardEntry = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to delete inward entry', detail: error.message });
   }
 };
+
+export const getInwardById = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const entry = await prisma.inwardEntry.findUnique({
+      where: { id: String(id) }
+    });
+
+    if (!entry) {
+      return res.status(404).json({ error: 'Inward entry not found' });
+    }
+
+    // Parse items
+    const items = JSON.parse(entry.items_json || '[]');
+
+    // Calculate balances
+    const invoices = await (prisma as any).legacyInvoice.findMany({
+      where: { inward_id: String(entry.id) }
+    });
+    const outwards = await prisma.outwardEntry.findMany({
+      where: { inward_id: String(entry.id) }
+    });
+
+    const balanceItems = items.map((item: any) => {
+      let totalDeducted = 0;
+      const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
+
+      // Add Invoiced quantities
+      invoices.forEach((inv: any) => {
+        const invItems = JSON.parse(inv.items_json || '[]');
+        const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
+        if (matchingItem) {
+          totalDeducted += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
+        }
+      });
+
+      // Add Outward quantities
+      outwards.forEach((ow: any) => {
+        const owItems = JSON.parse(ow.items_json || '[]');
+        const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
+        if (matchingItem) {
+          totalDeducted += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+        }
+      });
+
+      const originalQty = parseFloat(item.quantity || item.qty || '0');
+      return {
+        ...item,
+        originalQty,
+        deductedQty: totalDeducted,
+        remainingQty: Math.max(0, originalQty - totalDeducted)
+      };
+    });
+
+    res.json({
+      ...entry,
+      customerName: entry.customer_name,
+      vendorName: entry.vendor_name,
+      inwardNo: entry.inward_no,
+      poReference: entry.po_reference,
+      poDate: entry.po_date,
+      challanNo: entry.challan_no,
+      dcNo: entry.dc_no,
+      dcDate: entry.dc_date,
+      vehicleNo: entry.vehicle_no,
+      companyId: entry.company_id,
+      dueDate: entry.due_date,
+      createdAt: entry.created_at,
+      items: balanceItems,
+      totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0)
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch inward entry details', detail: error.message });
+  }
+};

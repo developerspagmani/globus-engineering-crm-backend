@@ -127,3 +127,23 @@ export const deleteChallan = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to delete challan', detail: error.message });
   }
 };
+
+export const getChallanById = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  try {
+    const challan = await prisma.challan.findUnique({
+      where: { id: String(id) }
+    });
+
+    if (!challan) {
+      return res.status(404).json({ error: 'Challan not found' });
+    }
+
+    res.json({
+      ...challan,
+      items: JSON.parse(challan.items_json || '[]')
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch challan details', detail: error.message });
+  }
+};
