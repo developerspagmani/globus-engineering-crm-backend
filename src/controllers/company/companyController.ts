@@ -3,29 +3,48 @@ import prisma from '../../config/prisma';
 import crypto from 'crypto';
 
 const mapCompany = (company: any) => {
-  const parsedSettings = company.invoice_settings ? JSON.parse(company.invoice_settings) : {};
+  let parsedSettings = {};
+  try {
+    parsedSettings = company.invoice_settings ? JSON.parse(company.invoice_settings) : {};
+    if (!parsedSettings || typeof parsedSettings !== 'object') {
+        parsedSettings = {};
+    }
+  } catch (e) {
+    console.error(`Failed to parse invoice_settings for company ${company.id}`, e);
+    parsedSettings = {};
+  }
+
   return {
     ...company,
-    activeModules: company.active_modules ? JSON.parse(company.active_modules) : [],
+    activeModules: (() => {
+        try {
+            return company.active_modules ? JSON.parse(company.active_modules) : [];
+        } catch (e) {
+            console.error(`Failed to parse active_modules for company ${company.id}`, e);
+            return [];
+        }
+    })(),
+
     logo: company.logo,
     logoSecondary: company.logo_secondary,
     invoiceSettings: {
       ...parsedSettings,
-      companyName: company.company_name || parsedSettings.companyName,
-      companySubHeader: company.company_sub_header || parsedSettings.companySubHeader,
-      companyAddress: company.company_address || parsedSettings.companyAddress,
-      gstNo: company.gst_no || parsedSettings.gstNo,
-      stateDetails: company.state_details || parsedSettings.stateDetails,
-      vatTin: company.vat_tin || parsedSettings.vatTin,
-      cstNo: company.cst_no || parsedSettings.cstNo,
-      panNo: company.pan_no || parsedSettings.panNo,
-      bankName: company.bank_name || parsedSettings.bankName,
-      bankAcc: company.bank_acc || parsedSettings.bankAcc,
-      bankBranchIfsc: company.bank_branch_ifsc || parsedSettings.bankBranchIfsc,
-      declarationText: company.declaration_text || parsedSettings.declarationText,
+      companyName: company.company_name || (parsedSettings as any).companyName,
+      companySubHeader: company.company_sub_header || (parsedSettings as any).companySubHeader,
+      companyAddress: company.company_address || (parsedSettings as any).companyAddress,
+      gstNo: company.gst_no || (parsedSettings as any).gstNo,
+      stateDetails: company.state_details || (parsedSettings as any).stateDetails,
+      vatTin: company.vat_tin || (parsedSettings as any).vatTin,
+      cstNo: company.cst_no || (parsedSettings as any).cstNo,
+      panNo: company.pan_no || (parsedSettings as any).panNo,
+      bankName: company.bank_name || (parsedSettings as any).bankName,
+      bankAcc: company.bank_acc || (parsedSettings as any).bankAcc,
+      bankBranchIfsc: company.bank_branch_ifsc || (parsedSettings as any).bankBranchIfsc,
+      declarationText: company.declaration_text || (parsedSettings as any).declarationText,
     }
   };
 };
+
 
 export const getCompanyById = async (req: Request, res: Response) => {
   const { id } = req.params;
@@ -47,9 +66,12 @@ export const getAllCompanies = async (req: Request, res: Response) => {
     const companies = await prisma.company.findMany();
     res.json(companies.map(mapCompany));
   } catch (error: any) {
+    console.error('CRITICAL ERROR in getAllCompanies:', error);
     res.status(500).json({ error: 'Failed to fetch companies', detail: error.message });
   }
 };
+
+
 
 export const createCompany = async (req: Request, res: Response) => {
   const { name, slug, plan, activeModules, logo, logoSecondary, invoiceSettings } = req.body;

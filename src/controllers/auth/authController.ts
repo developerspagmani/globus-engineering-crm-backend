@@ -8,29 +8,48 @@ const JWT_SECRET = process.env.JWT_SECRET || 'globus_crm_secret_key_2024';
 
 const mapCompany = (company: any) => {
   if (!company) return null;
-  const parsedSettings = company.invoice_settings ? JSON.parse(company.invoice_settings) : {};
+  
+  let parsedSettings = {};
+  try {
+    parsedSettings = company.invoice_settings ? JSON.parse(company.invoice_settings) : {};
+    if (!parsedSettings || typeof parsedSettings !== 'object') {
+        parsedSettings = {};
+    }
+  } catch (e) {
+    console.error(`Failed to parse invoice_settings for company ${company.id}`, e);
+    parsedSettings = {};
+  }
+
   return {
     ...company,
-    activeModules: company.active_modules ? JSON.parse(company.active_modules) : [],
+    activeModules: (() => {
+        try {
+            return company.active_modules ? JSON.parse(company.active_modules) : [];
+        } catch (e) {
+            console.error(`Failed to parse active_modules for company ${company.id}`, e);
+            return [];
+        }
+    })(),
     logo: company.logo,
     logoSecondary: company.logo_secondary,
     invoiceSettings: {
       ...parsedSettings,
-      companyName: company.company_name || parsedSettings.companyName,
-      companySubHeader: company.company_sub_header || parsedSettings.companySubHeader,
-      companyAddress: company.company_address || parsedSettings.companyAddress,
-      gstNo: company.gst_no || parsedSettings.gstNo,
-      stateDetails: company.state_details || parsedSettings.stateDetails,
-      vatTin: company.vat_tin || parsedSettings.vatTin,
-      cstNo: company.cst_no || parsedSettings.cstNo,
-      panNo: company.pan_no || parsedSettings.panNo,
-      bankName: company.bank_name || parsedSettings.bankName,
-      bankAcc: company.bank_acc || parsedSettings.bankAcc,
-      bankBranchIfsc: company.bank_branch_ifsc || parsedSettings.bankBranchIfsc,
-      declarationText: company.declaration_text || parsedSettings.declarationText,
+      companyName: company.company_name || (parsedSettings as any).companyName,
+      companySubHeader: company.company_sub_header || (parsedSettings as any).companySubHeader,
+      companyAddress: company.company_address || (parsedSettings as any).companyAddress,
+      gstNo: company.gst_no || (parsedSettings as any).gstNo,
+      stateDetails: company.state_details || (parsedSettings as any).stateDetails,
+      vatTin: company.vat_tin || (parsedSettings as any).vatTin,
+      cstNo: company.cst_no || (parsedSettings as any).cstNo,
+      panNo: company.pan_no || (parsedSettings as any).panNo,
+      bankName: company.bank_name || (parsedSettings as any).bankName,
+      bankAcc: company.bank_acc || (parsedSettings as any).bankAcc,
+      bankBranchIfsc: company.bank_branch_ifsc || (parsedSettings as any).bankBranchIfsc,
+      declarationText: company.declaration_text || (parsedSettings as any).declarationText,
     }
   };
 };
+
 
 export const login = async (req: Request, res: Response) => {
   const { email, password, company_id } = req.body;
@@ -75,7 +94,15 @@ export const login = async (req: Request, res: Response) => {
         role: user.role, 
         company_id: user.company_id,
         assigned_area: (user as any).assigned_area,
-        module_permissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
+        module_permissions: (() => {
+          try {
+            return (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : [];
+          } catch (e) {
+            console.error(`Failed to parse module_permissions for user ${user.id}`, e);
+            return [];
+          }
+        })()
+
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -88,7 +115,15 @@ export const login = async (req: Request, res: Response) => {
         password: '',
         company_id: user.company_id,
         assignedArea: (user as any).assigned_area,
-        modulePermissions: (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : []
+        modulePermissions: (() => {
+          try {
+            return (user.module_permissions && user.module_permissions.trim()) ? JSON.parse(user.module_permissions) : [];
+          } catch (e) {
+            console.error(`Failed to parse module_permissions for user ${user.id}`, e);
+            return [];
+          }
+        })()
+
       },
       company: mapCompany(user.company)
     });

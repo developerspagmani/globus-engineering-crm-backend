@@ -13,9 +13,22 @@ export const getAllUsers = async (req: AuthRequest, res: Response) => {
     const formattedUsers = users.map(u => ({
       ...u,
       password: '',
-      permissions: (u as any).permissions ? JSON.parse((u as any).permissions) : [],
+      permissions: (() => {
+        try {
+          return (u as any).permissions ? JSON.parse((u as any).permissions) : [];
+        } catch (e) {
+          return [];
+        }
+      })(),
       assignedArea: (u as any).assigned_area,
-      modulePermissions: (u as any).module_permissions ? JSON.parse((u as any).module_permissions) : []
+      modulePermissions: (() => {
+        try {
+          return (u as any).module_permissions ? JSON.parse((u as any).module_permissions) : [];
+        } catch (e) {
+          return [];
+        }
+      })()
+
     }));
     res.json(formattedUsers);
   } catch (error: any) {
@@ -49,9 +62,22 @@ export const createUser = async (req: AuthRequest, res: Response) => {
       user: { 
         ...user, 
         password: '',
-        permissions: (user as any).permissions ? JSON.parse((user as any).permissions) : [],
+        permissions: (() => {
+          try {
+            return (user as any).permissions ? JSON.parse((user as any).permissions) : [];
+          } catch (e) {
+            return [];
+          }
+        })(),
         assignedArea: (user as any).assigned_area,
-        modulePermissions: (user as any).module_permissions ? JSON.parse((user as any).module_permissions) : []
+        modulePermissions: (() => {
+          try {
+            return (user as any).module_permissions ? JSON.parse((user as any).module_permissions) : [];
+          } catch (e) {
+            return [];
+          }
+        })()
+
       }
     });
   } catch (error: any) {
@@ -107,9 +133,22 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
       user: { 
         ...user, 
         password: '',
-        permissions: (user as any).permissions ? JSON.parse((user as any).permissions) : [],
+        permissions: (() => {
+          try {
+            return (user as any).permissions ? JSON.parse((user as any).permissions) : [];
+          } catch (e) {
+            return [];
+          }
+        })(),
         assignedArea: (user as any).assigned_area,
-        modulePermissions: (user as any).module_permissions ? JSON.parse((user as any).module_permissions) : []
+        modulePermissions: (() => {
+          try {
+            return (user as any).module_permissions ? JSON.parse((user as any).module_permissions) : [];
+          } catch (e) {
+            return [];
+          }
+        })()
+
       } 
     });
   } catch (error: any) {
