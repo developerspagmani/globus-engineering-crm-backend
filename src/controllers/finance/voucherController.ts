@@ -11,9 +11,10 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 
   // Pagination & Filter Params
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const limit = req.query.id ? 100 : (parseInt(req.query.limit as string) || 10);
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const id = req.query.id as string;
 
   try {
     const where: any = {
@@ -27,6 +28,10 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
           { company_id: String(companyId).toLowerCase() }
         ]
       });
+    }
+
+    if (id) {
+      where.AND.push({ id: String(id) });
     }
 
     if (search) {
