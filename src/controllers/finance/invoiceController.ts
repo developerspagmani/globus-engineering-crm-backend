@@ -13,7 +13,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
 
   // 2. Pagination & Filter Params
   const page = parseInt(req.query.page as string) || 1;
-  const limit = parseInt(req.query.limit as string) || 10;
+  const limit = req.query.invoice_nos ? 1000 : (parseInt(req.query.limit as string) || 10);
   const skip = (page - 1) * limit;
 
   const search = (req.query.search as string || '').toLowerCase();
@@ -21,6 +21,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const fromDate = req.query.fromDate as string;
   const toDate = req.query.toDate as string;
   const type = req.query.type as string; // Optional: filter by invoice type (WP, WOP, BOTH)
+  const invoiceNos = req.query.invoice_nos as string;
 
   try {
     // 3. Build Filter Clause
@@ -120,6 +121,19 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       if (fromDate) dateFilter.gte = new Date(fromDate);
       if (toDate) dateFilter.lte = new Date(toDate);
       where.AND.push({ invoice_date: dateFilter });
+    }
+
+    // Specific Invoice Nos Filter (for Vouchers lookup)
+    if (invoiceNos) {
+      const nos = invoiceNos.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+      const ids = invoiceNos.split(',').map(n => n.trim()).filter(n => n !== '');
+      where.AND.push({
+        OR: [
+          { invoice_no: { in: nos } },
+          { id: { in: nos } },
+          { id: { in: ids.map(id => parseInt(id)).filter(id => !isNaN(id)) } }
+        ]
+      });
     }
 
     // 4. Execute Queries (including aggregate sums for header cards)
