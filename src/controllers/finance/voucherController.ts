@@ -71,7 +71,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
     ]);
 
     const totalCollected = amountRows.reduce(
-      (sum: number, v: any) => sum + (parseFloat(String(v.amount || '0')) || 0),
+      (sum: number, v: any) => sum + (parseFloat(String(v.amount || '0').replace(/[^\d.]/g, '')) || 0),
       0
     );
 
