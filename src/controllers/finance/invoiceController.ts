@@ -233,7 +233,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate
   } = req.body;
 
-  const finalTaxRate = parseFloat(String(tax_rate || taxRate || '12'));
+  const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18'));
   const finalSubTotal = parseFloat(String(subTotal || '0'));
   const finalGrandTotal = parseFloat(String(grandTotal || '0'));
   const finalTaxTotal = finalGrandTotal - finalSubTotal;
