@@ -42,8 +42,8 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
           tax_total: true
         }
       }),
-      prisma.legacyCustomer.count({ where: { AND: [companyWhere, { status: 'active' }] } }),
-      prisma.vendor.count({ where: { AND: [companyWhere, { status: 'active' }] } }),
+      prisma.legacyCustomer.count({ where: companyWhere }),
+      prisma.vendor.count({ where: companyWhere }),
       prisma.legacyInvoice.findMany({
         where: companyWhere,
         orderBy: [
