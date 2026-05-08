@@ -77,9 +77,14 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     if (fromDate || toDate) {
       const dateFilter: any = {};
       if (fromDate) dateFilter.gte = new Date(fromDate);
-      if (toDate) dateFilter.lte = new Date(toDate);
+      if (toDate) {
+        const endDay = new Date(toDate);
+        endDay.setHours(23, 59, 59, 999);
+        dateFilter.lte = endDay;
+      }
       baseWhere.AND.push({ invoice_date: dateFilter });
     }
+
 
     // clone baseWhere for the filtered view (the list)
     const filteredWhere = JSON.parse(JSON.stringify(baseWhere));

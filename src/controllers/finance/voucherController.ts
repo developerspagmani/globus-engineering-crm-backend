@@ -60,6 +60,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
       where.AND.push({ date: dateFilter });
     }
 
+
     if (partyId) {
       where.AND.push({ party_id: String(partyId) });
     }
