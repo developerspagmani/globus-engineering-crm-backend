@@ -48,15 +48,10 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     const baseWhere: any = { AND: [] };
 
     if (effectiveCompanyId) {
-      baseWhere.AND.push({
-        OR: [
-          { company_id: String(effectiveCompanyId) },
-          { company_id: { contains: String(effectiveCompanyId) } },
-          { company_id: { contains: String(effectiveCompanyId).toLowerCase() } },
-          { company_id: { contains: String(effectiveCompanyId).toUpperCase() } }
-        ]
-      });
-    } else if (user.role !== 'super_admin') {
+      baseWhere.AND.push({ company_id: String(effectiveCompanyId) });
+    }
+
+ else if (user.role !== 'super_admin') {
       baseWhere.AND.push({ id: -1 }); 
     }
 

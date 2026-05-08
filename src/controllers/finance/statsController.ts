@@ -19,11 +19,11 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
     const companyWhere = {
       OR: [
         { company_id: String(companyId) },
-        { company_id: { contains: String(companyId) } },
-        { company_id: { contains: String(companyId).toLowerCase() } },
-        { company_id: { contains: String(companyId).toUpperCase() } }
+        { company_id: String(companyId).toLowerCase() },
+        { company_id: String(companyId).toUpperCase() }
       ]
     };
+
 
     const [invoices, customerCount, vendorCount, latestInvoices, latestInwards] = await Promise.all([
       prisma.legacyInvoice.findMany({
