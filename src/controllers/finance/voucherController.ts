@@ -97,7 +97,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 };
 
 export const createVoucher = async (req: AuthRequest, res: Response) => {
-  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status } = req.body;
+  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status, tds_amount } = req.body;
   const user = req.user;
   const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
@@ -123,16 +123,23 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           cheque_no: cheque_no || '',
           description_: description || '',
           company_id: finalCompanyId ? String(finalCompanyId) : null,
-          status: status || 'posted'
+          status: status || 'posted',
+          tds_amount: parseFloat(String(tds_amount || '0')) || 0
         }
       });
 
       // 2. If it's a receipt from a customer, update the Invoice and Ledger
       if (type === 'receipt' && party_type === 'customer') {
-        const invNumbers = reference_no ? String(reference_no).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+        // Extract invoice numbers/IDs from the reference string (handles "INV-001 (5000)" format)
+        const invNumbers = reference_no 
+          ? String(reference_no)
+              .split(',')
+              .map((s: string) => s.trim().split('(')[0].trim()) 
+              .filter(Boolean) 
+          : [];
         
         if (invNumbers.length > 0) {
-          // ... (existing invoice status update logic is fine, keeping it for auto-reconciliation)
+          // Map to integers for DB lookup (handles both IDs and Invoice Nos)
           const invNumsAsInts = invNumbers.map((n: string) => {
             const onlyDigits = n.replace(/\D/g, '');
             return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
@@ -161,10 +168,16 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           let remainingAmount = finalAmount;
           for (const inv of invoices) {
             if (remainingAmount <= 0) break;
-            const currentGrandTotal = parseFloat(inv.grand_total || '0');
-            const currentPaidAmount = parseFloat(inv.paid_amount || '0');
+            
+            // Clean strings of currency symbols and commas before parsing
+            const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
+            const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
+            
+            const currentGrandTotal = parseFloat(cleanGrand) || 0;
+            const currentPaidAmount = parseFloat(cleanPaid) || 0;
+            
             const balanceDue = currentGrandTotal - currentPaidAmount;
-            if (balanceDue <= 0) continue;
+            if (balanceDue <= 0.1) continue; // Already paid
 
             const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
             const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
@@ -173,7 +186,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
               where: { id: inv.id },
               data: {
                 paid_amount: String(newPaidAmount),
-                status: newPaidAmount >= currentGrandTotal ? 'PAID' : 'BILLED'
+                status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED'
               }
             });
             remainingAmount -= paymentForThisInvoice;
@@ -224,6 +237,9 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
       }
 
       return voucher;
+    }, {
+      maxWait: 10000,
+      timeout: 30000
     });
 
     res.status(201).json(result);
@@ -234,7 +250,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
 
 export const updateVoucher = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status } = req.body;
+  const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status, tds_amount } = req.body;
   try {
     const voucher = await prisma.voucher.update({
       where: { id: String(id) },
@@ -250,7 +266,8 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
         reference_no,
         cheque_no,
         description_: description,
-        status: status?.toLowerCase()
+        status: status?.toLowerCase(),
+        tds_amount: tds_amount ? parseFloat(String(tds_amount)) : undefined
       }
     });
     res.json(voucher);

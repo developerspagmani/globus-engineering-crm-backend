@@ -8,47 +8,46 @@ datasource db {
   relationMode = "prisma"
 }
 
-
 model LegacyCustomer {
-  id              Int       @id @default(autoincrement())
-  customer_name   String?   @db.VarChar(200)
-  street1         String?   @db.VarChar(250)
-  street2         String?   @db.VarChar(250)
-  city            String?   @db.VarChar(150)
-  state           String?   @db.VarChar(230)
-  state_code      String?   @db.VarChar(15)
-  area            String?   @db.VarChar(150)
+  id              Int             @id @default(autoincrement())
+  customer_name   String?         @db.VarChar(200)
+  street1         String?         @db.VarChar(250)
+  street2         String?         @db.VarChar(250)
+  city            String?         @db.VarChar(150)
+  state           String?         @db.VarChar(230)
+  state_code      String?         @db.VarChar(15)
+  area            String?         @db.VarChar(150)
   pin_code        Int?
-  contact_person1 String?   @db.VarChar(200)
-  designation1    String?   @db.VarChar(200)
-  email_id1       String?   @db.VarChar(250)
-  phone_number1   String?   @db.VarChar(200)
-  contact_person2 String?   @db.VarChar(200)
-  designation2    String?   @db.VarChar(200)
-  email_id2       String?   @db.VarChar(200)
-  phone_number2   String?   @db.VarChar(200)
-  contact_person3 String?   @db.VarChar(200)
-  designation3    String?   @db.VarChar(200)
-  email_id3       String?   @db.VarChar(200)
-  phone_number3   String?   @db.VarChar(200)
+  contact_person1 String?         @db.VarChar(200)
+  designation1    String?         @db.VarChar(200)
+  email_id1       String?         @db.VarChar(250)
+  phone_number1   String?         @db.VarChar(200)
+  contact_person2 String?         @db.VarChar(200)
+  designation2    String?         @db.VarChar(200)
+  email_id2       String?         @db.VarChar(200)
+  phone_number2   String?         @db.VarChar(200)
+  contact_person3 String?         @db.VarChar(200)
+  designation3    String?         @db.VarChar(200)
+  email_id3       String?         @db.VarChar(200)
+  phone_number3   String?         @db.VarChar(200)
   land_line       Int?
-  gst             String?   @db.VarChar(50)
-  tin             String?   @db.VarChar(50)
-  cst             String?   @db.VarChar(50)
+  gst             String?         @db.VarChar(50)
+  tin             String?         @db.VarChar(50)
+  cst             String?         @db.VarChar(50)
   tc              Int?
   vmc             Int?
   hmc             Int?
-  payment_terms   String?   @db.VarChar(100)
-  customer_type   String?   @db.VarChar(100)
-  fax             String?   @db.VarChar(250)
-  email           String?   @db.VarChar(255)
-  phone           String?   @db.VarChar(50)
-  industry        String?   @db.VarChar(100)
-  status          String?   @default("active") @db.VarChar(50)
-  agent_id        String?   @db.VarChar(50)
-  company_id      String?   @db.VarChar(50)
-  app_created_at  DateTime? @default(now()) @db.Timestamp(0)
-  district        String?   @db.VarChar(100)
+  payment_terms   String?         @db.VarChar(100)
+  customer_type   String?         @db.VarChar(100)
+  fax             String?         @db.VarChar(250)
+  email           String?         @db.VarChar(255)
+  phone           String?         @db.VarChar(50)
+  industry        String?         @db.VarChar(100)
+  status          String?         @default("active") @db.VarChar(50)
+  agent_id        String?         @db.VarChar(50)
+  company_id      String?         @db.VarChar(50)
+  app_created_at  DateTime?       @default(now()) @db.Timestamp(0)
+  district        String?         @db.VarChar(100)
   emailLogs       EmailLog[]
   invoices        LegacyInvoice[]
 
@@ -114,46 +113,43 @@ model LegacyInvoice {
   items_json     String?           @db.Text
   sub_total      Float?
   tax_total      Float?
-  tax_rate       Float?            @default(12)
   inward_id      String?           @db.VarChar(50)
   notes          String?           @db.Text
   gstin          String?           @db.VarChar(15)
   state          String?           @db.VarChar(100)
+  tax_rate       Float?            @default(12)
   reminders      InvoiceReminder[]
   emailLogs      EmailLog[]
-  customer       LegacyCustomer? @relation(fields: [customer_id], references: [id])
+  customer       LegacyCustomer?   @relation(fields: [customer_id], references: [id])
 
   @@map("tbl_invoice")
 }
 
 model Company {
-  id               String            @id @db.VarChar(50)
-  name             String            @db.VarChar(255)
-  slug             String            @db.VarChar(100)
-  plan             String            @db.VarChar(50)
-  active_modules   String?           @db.Text
-  logo             String?           @db.LongText
-  logo_secondary   String?           @db.LongText
-  invoice_settings String?           @db.LongText
-  
-  // Separate columns for critical invoice/company data
-  company_name       String?         @db.VarChar(255)
-  company_sub_header String?         @db.VarChar(255)
-  company_address    String?         @db.Text
-  gst_no             String?         @db.VarChar(50)
-  state_details      String?         @db.VarChar(100)
-  vat_tin            String?         @db.VarChar(50)
-  cst_no             String?         @db.VarChar(50)
-  pan_no             String?         @db.VarChar(50)
-  bank_name          String?         @db.VarChar(255)
-  bank_acc           String?         @db.VarChar(100)
-  bank_branch_ifsc   String?         @db.VarChar(100)
-  declaration_text   String?         @db.Text
-
-  users            User[]
-  leads            Lead[]
-  deals            Deal[]
-  reminders        InvoiceReminder[]
+  id                 String            @id @db.VarChar(50)
+  name               String            @db.VarChar(255)
+  slug               String            @db.VarChar(100)
+  plan               String            @db.VarChar(50)
+  active_modules     String?           @db.Text
+  invoice_settings   String?           @db.LongText
+  logo               String?           @db.LongText
+  logo_secondary     String?           @db.LongText
+  bank_acc           String?           @db.VarChar(100)
+  bank_branch_ifsc   String?           @db.VarChar(100)
+  bank_name          String?           @db.VarChar(255)
+  company_address    String?           @db.Text
+  company_name       String?           @db.VarChar(255)
+  company_sub_header String?           @db.VarChar(255)
+  cst_no             String?           @db.VarChar(50)
+  declaration_text   String?           @db.Text
+  gst_no             String?           @db.VarChar(50)
+  pan_no             String?           @db.VarChar(50)
+  state_details      String?           @db.VarChar(100)
+  vat_tin            String?           @db.VarChar(50)
+  users              User[]
+  leads              Lead[]
+  deals              Deal[]
+  reminders          InvoiceReminder[]
 
   @@map("app_companies")
 }
@@ -302,12 +298,14 @@ model InwardEntry {
   vehicle_no    String?   @db.VarChar(50)
   company_id    String?   @db.VarChar(50)
   date          DateTime? @db.Date
-  due_date      DateTime? @db.Date
   status        String?   @db.VarChar(50)
   items_json    String?   @db.Text
   created_at    DateTime? @default(now()) @db.Timestamp(0)
   po_date       DateTime? @db.Date
+  due_date      DateTime? @db.Date
   party_type    String?   @db.VarChar(50)
+  outward_id    String?   @db.VarChar(50)
+  outward_no    String?   @db.VarChar(50)
 
   @@map("app_inward_entries")
 }
@@ -315,25 +313,25 @@ model InwardEntry {
 model OutwardEntry {
   id                String    @id @db.VarChar(50)
   outward_no        String    @db.VarChar(50)
-  party_type        String?   @default("customer") @db.VarChar(50)
   customer_id       String?   @db.VarChar(50)
   customer_name     String?   @db.VarChar(255)
-  vendor_id         String?   @db.VarChar(50)
-  vendor_name       String?   @db.VarChar(255)
-  process_name      String?   @db.VarChar(255)
   invoice_reference String?   @db.VarChar(100)
   challan_no        String?   @db.VarChar(100)
   vehicle_no        String?   @db.VarChar(50)
-  driver_name       String?   @db.VarChar(100)
-  notes             String?   @db.Text
   company_id        String?   @db.VarChar(50)
   date              DateTime? @db.Date
   status            String?   @db.VarChar(50)
-  amount            Float?    @default(0)
   items_json        String?   @db.Text
   created_at        DateTime? @default(now()) @db.Timestamp(0)
   inward_id         String?   @db.VarChar(50)
   inward_no         String?   @db.VarChar(50)
+  party_type        String?   @default("customer") @db.VarChar(50)
+  vendor_id         String?   @db.VarChar(50)
+  vendor_name       String?   @db.VarChar(255)
+  process_name      String?   @db.VarChar(255)
+  driver_name       String?   @db.VarChar(100)
+  notes             String?   @db.Text
+  amount            Float?    @default(0)
 
   @@map("app_outward_entries")
 }
@@ -345,14 +343,14 @@ model LedgerEntry {
   party_type   String    @db.VarChar(50)
   company_id   String?   @db.VarChar(50)
   date         DateTime? @db.Date
-  vch_type     String?   @db.VarChar(50)
-  vch_no       String?   @db.VarChar(50)
-  type         String    @db.VarChar(20) // debit or credit
+  type         String    @db.VarChar(20)
   amount       Float
   balance      Float
   description  String?   @db.Text
   reference_id String?   @db.VarChar(100)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
+  vch_type     String?   @db.VarChar(50)
+  vch_no       String?   @db.VarChar(50)
 
   @@map("app_ledger_entries")
 }
@@ -386,11 +384,12 @@ model Voucher {
   company_id   String?   @db.VarChar(50)
   amount       Float?
   payment_mode String?   @db.VarChar(50)
-  reference_no String?   @db.VarChar(100)
+  reference_no String?   @db.Text
   description_ String?   @map("description?") @db.Text
   status       String?   @db.VarChar(50)
   created_at   DateTime? @default(now()) @db.Timestamp(0)
   cheque_no    String?   @db.VarChar(50)
+  tds_amount   Float?    @default(0)
 
   @@map("app_vouchers")
 }
@@ -659,24 +658,21 @@ model AuditLog {
 }
 
 model InvoiceReminder {
-  id        String        @id @default(cuid())
+  id        String         @id @default(cuid())
   invoiceId Int
-  companyId String        @db.VarChar(50)
-  enabled   Boolean       @default(true)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-
-  // Relations
-  invoice LegacyInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  company Company?       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  companyId String         @db.VarChar(50)
+  enabled   Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  invoice   LegacyInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  company   Company?       @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([invoiceId, companyId])
   @@map("invoice_reminders")
 }
 
-
 model EmailLog {
-  id             String   @id @default(cuid())
+  id             String          @id @default(cuid())
   invoiceId      Int
   customerId     Int
   reminderType   String
@@ -684,12 +680,9 @@ model EmailLog {
   recipientEmail String
   status         String
   errorMessage   String?
-  createdAt      DateTime @default(now())
-
-  // Relations
-  invoice  LegacyInvoice?  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  customer LegacyCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  invoice        LegacyInvoice?  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer       LegacyCustomer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@map("email_logs")
 }
-

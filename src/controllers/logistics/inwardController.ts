@@ -148,7 +148,10 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         dueDate: e.due_date,
         createdAt: e.created_at,
         items: balanceItems,
-        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0)
+        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0),
+        outwardId: e.outward_id,
+        outwardNo: e.outward_no,
+        partyType: e.party_type
       };
     });
 
@@ -174,7 +177,8 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const {
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
-    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items, company_id, companyId
+    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items, company_id, companyId,
+    party_type, partyType, outward_id, outwardId, outward_no, outwardNo
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
@@ -199,7 +203,10 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
         status: status || 'pending',
         items_json: JSON.stringify(items || []),
         due_date: due_date ? new Date(due_date) : null,
-        date: new Date()
+        date: new Date(),
+        party_type: party_type || partyType || 'customer',
+        outward_id: String(outward_id || outwardId || ''),
+        outward_no: String(outward_no || outwardNo || '')
       }
     });
 
@@ -216,7 +223,8 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
-    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items
+    po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items,
+    party_type, partyType, outward_id, outwardId, outward_no, outwardNo
   } = req.body;
 
   try {
@@ -238,6 +246,9 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
         status,
         due_date: due_date ? new Date(due_date) : undefined,
         items_json: items ? JSON.stringify(items) : undefined,
+        party_type: party_type || partyType,
+        outward_id: outward_id || outwardId,
+        outward_no: outward_no || outwardNo,
       }
     });
 
@@ -279,6 +290,13 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
               { company_id: String(companyId) },
               { company_id: String(companyId).toLowerCase() },
               { company_id: String(companyId).toUpperCase() }
+            ]
+          },
+          {
+            OR: [
+              { status: 'pending' },
+              { status: 'partial' },
+              { status: null }
             ]
           },
           {
@@ -470,7 +488,10 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       dueDate: entry.due_date,
       createdAt: entry.created_at,
       items: balanceItems,
-      totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0)
+      totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0),
+      outwardId: entry.outward_id,
+      outwardNo: entry.outward_no,
+      partyType: entry.party_type
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch inward entry details', detail: error.message });

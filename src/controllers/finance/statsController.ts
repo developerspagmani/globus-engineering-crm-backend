@@ -8,7 +8,18 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 export const getFinanceStats = async (req: AuthRequest, res: Response) => {
   const user = req.user;
   const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
-  const companyId = queryCompanyId || user?.company_id || (user as any)?.companyId;
+  let companyId = queryCompanyId || user?.company_id || (user as any)?.companyId;
+
+  // Strict resolution: If context is missing in token/query, fetch from DB
+  if (!companyId && user?.id) {
+    try {
+      const dbUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        select: { company_id: true }
+      });
+      if (dbUser?.company_id) companyId = dbUser.company_id;
+    } catch (err) {}
+  }
 
   if (!companyId && user?.role !== 'super_admin') {
     return res.status(400).json({ error: 'Company ID is required for dashboard statistics.' });

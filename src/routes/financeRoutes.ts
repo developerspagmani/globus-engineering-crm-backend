@@ -145,6 +145,7 @@ router.delete('/vendors/:id', authorize(['super_admin', 'company_admin']) as any
  *               voucher_no: { type: string }
  *               party_name: { type: string }
  *               amount: { type: number }
+ *               tds_amount: { type: number }
  *               payment_mode: { type: string }
  *     responses:
  *       201: { description: Created }

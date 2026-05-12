@@ -67,9 +67,9 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     doc.restore();
 
     // Center Text
-    doc.fontSize(22).font('Helvetica-Bold').text('GLOBUS ENGINEERING MAIN', 130, 60, { width: 330, align: 'center' });
+    doc.fontSize(22).font('Helvetica-Bold').text((data.companyName || 'GLOBUS ENGINEERING TOOLS').toUpperCase(), 130, 60, { width: 330, align: 'center' });
     doc.fontSize(10).font('Helvetica-Bold').text('An ISO 9001: 2015 Certified Company', 130, 85, { width: 330, align: 'center' });
-    doc.fontSize(8).font('Helvetica').text('Precision Machining & Quality Engineering Solutions', 130, 97, { width: 330, align: 'center' });
+    doc.fontSize(8).font('Helvetica').text('No 24,Annaiyappan Street,S.S.Nagar, Nallampalayam,Ganapathy Post, Coimbatore-641006.', 130, 97, { width: 330, align: 'center' });
 
     // Right TÜV SÜD Logo
     doc.rect(480, 50, 60, 60).stroke();
@@ -84,7 +84,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
 
     // --- Meta Grid ---
     let y = 120;
-    doc.fontSize(8).font('Helvetica');
+    doc.fontSize(7.5).font('Helvetica');
     const drawCol = (x: number, label: string, val: string, w: number) => {
       doc.font('Helvetica').text(label, x + 5, y + 4);
       doc.font('Helvetica-Bold').text(`: ${val}`, x + 65, y + 4);
@@ -99,7 +99,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     y += 15;
     drawRowLine(y);
     drawCol(leftX, 'Invoice Date', data.invoiceDate, 130);
-    drawCol(leftX + 130, 'DC Dte', data.dcDate, 130);
+    drawCol(leftX + 130, 'DC Date', data.dcDate, 130);
     drawCol(leftX + 260, 'PO Date', data.poDate, 130);
     drawCol(leftX + 390, 'Reverse Charge (Y/N)', 'N', 130);
 
@@ -123,12 +123,12 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
 
     // --- Address Content ---
     const addrY = y + 5;
-    doc.fontSize(8);
+    doc.fontSize(9.5);
     // Supplier
     doc.font('Helvetica').text('Name', leftX + 5, addrY);
     doc.font('Helvetica-Bold').text(`: ${data.companyName}`, leftX + 45, addrY);
     doc.font('Helvetica').text('Address', leftX + 5, addrY + 12);
-    doc.text(`: ${data.companyAddress}`, leftX + 45, addrY + 12, { width: 200 });
+    doc.text(`: ${(data.companyAddress || '').toUpperCase()}`, leftX + 45, addrY + 12, { width: 200 });
     doc.text('GST No', leftX + 5, addrY + 36);
     doc.font('Helvetica-Bold').text(`: ${data.companyGst}`, leftX + 45, addrY + 36);
     doc.font('Helvetica').text('State', leftX + 5, addrY + 48);
@@ -139,7 +139,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     doc.font('Helvetica').text('Name', leftX + width / 2 + 5, addrY);
     doc.font('Helvetica-Bold').text(`: ${data.customerName}`, leftX + width / 2 + 45, addrY);
     doc.font('Helvetica').text('Address', leftX + width / 2 + 5, addrY + 12);
-    doc.text(`: ${data.customerAddress}`, leftX + width / 2 + 45, addrY + 12, { width: 200 });
+    doc.text(`: ${(data.customerAddress || '').toUpperCase()}`, leftX + width / 2 + 45, addrY + 12, { width: 200 });
     doc.text('GST No', leftX + width / 2 + 5, addrY + 36);
     doc.font('Helvetica-Bold').text(`: ${data.customerGst}`, leftX + width / 2 + 45, addrY + 36);
     doc.font('Helvetica').text('State', leftX + width / 2 + 5, addrY + 48);
@@ -153,8 +153,8 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     doc.rect(leftX, y, width, 18).fillColor('#f0f0f0').fill();
     doc.fillColor('black').font('Helvetica-Bold').fontSize(8);
     doc.text('S.NO', leftX + 2, y + 5, { width: 30, align: 'center' });
-    doc.text('DESCRIPTION OF GOODS', leftX + 35, y + 5, { width: 230, align: 'center' });
-    doc.text('SAC CODE', leftX + 265, y + 5, { width: 60, align: 'center' });
+    doc.text('DESCRIPTION', leftX + 35, y + 5, { width: 230, align: 'center' });
+    doc.text('HSN CODE', leftX + 265, y + 5, { width: 60, align: 'center' });
     doc.text('QTY', leftX + 325, y + 5, { width: 40, align: 'center' });
     doc.text('PRICE', leftX + 365, y + 5, { width: 70, align: 'center' });
     doc.text('AMOUNT (₹)', leftX + 435, y + 5, { width: 80, align: 'center' });
@@ -240,7 +240,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     y += 40;
     drawRowLine(y);
     doc.fontSize(10).font('Helvetica-Bold').text('Receivers Sign :', leftX + 5, y + 5);
-    doc.text(`For ${data.companyName}`, leftX + width / 2, y + 5, { width: width / 2, align: 'center' });
+    doc.text(`FOR ${(data.companyName || '').toUpperCase()}`, leftX + width / 2, y + 5, { width: width / 2, align: 'center' });
 
     y += 60;
     drawRowLine(y);

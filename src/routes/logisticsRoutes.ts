@@ -10,9 +10,13 @@ const router = Router();
  * /api/inward:
  *   get: { summary: Get inward entries, tags: [Logistics], parameters: [{ in: query, name: companyId, schema: { type: string } }], responses: { 200: { description: List of entries } } }
  *   post: { summary: Create inward entry, tags: [Logistics], responses: { 201: { description: Created } } }
+ * /api/inward/pending/{customerId}:
+ *   get: { summary: Get pending inwards for customer, tags: [Logistics], parameters: [{ in: path, name: customerId, required: true, schema: { type: string } }], responses: { 200: { description: List of pending inwards } } }
  * /api/outward:
  *   get: { summary: Get outward entries, tags: [Logistics], parameters: [{ in: query, name: companyId, schema: { type: string } }], responses: { 200: { description: List of entries } } }
  *   post: { summary: Create outward entry, tags: [Logistics], responses: { 201: { description: Created } } }
+ * /api/outward/pending/{vendorId}:
+ *   get: { summary: Get pending outwards for vendor (Job Work), tags: [Logistics], parameters: [{ in: path, name: vendorId, required: true, schema: { type: string } }], responses: { 200: { description: List of pending outwards } } }
  */
 // Inward Entry
 router.get('/inward', checkPermission('mod_inward', 'canRead') as any, inwardController.getInwardEntries);
@@ -24,6 +28,7 @@ router.delete('/inward/:id', checkPermission('mod_inward', 'canDelete') as any, 
 
 // Outward Entry
 router.get('/outward', checkPermission('mod_outward', 'canRead') as any, outwardController.getOutwardEntries);
+router.get('/outward/pending/:vendorId', checkPermission('mod_outward', 'canRead') as any, outwardController.getPendingOutwardsByVendor);
 router.get('/outward/:id', checkPermission('mod_outward', 'canRead') as any, outwardController.getOutwardById);
 router.post('/outward', checkPermission('mod_outward', 'canCreate') as any, outwardController.createOutwardEntry);
 router.put('/outward/:id', checkPermission('mod_outward', 'canEdit') as any, outwardController.updateOutwardEntry);

@@ -334,3 +334,84 @@ export const getOutwardById = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch outward entry details', detail: error.message });
   }
 };
+
+export const getPendingOutwardsByVendor = async (req: AuthRequest, res: Response) => {
+  const vendorId = String(req.params.vendorId);
+  const user = req.user;
+  const companyId = user?.company_id;
+
+  try {
+    // 1. Find all outwards for this vendor
+    const outwards = await prisma.outwardEntry.findMany({
+      where: {
+        AND: [
+          { company_id: String(companyId) },
+          { vendor_id: String(vendorId) },
+          { party_type: 'vendor' }
+        ]
+      }
+    });
+
+    // 2. Get all related inwards to calculate what's been returned
+    const relatedInwards = await prisma.inwardEntry.findMany({
+      where: {
+        outward_id: { in: outwards.map(o => o.id) }
+      }
+    });
+
+    // Pre-group for O(1) lookup
+    const inwardGroups = new Map<string, any[]>();
+    relatedInwards.forEach((inw: any) => {
+      const gid = String(inw.outward_id);
+      if (!inwardGroups.has(gid)) inwardGroups.set(gid, []);
+      inwardGroups.get(gid)!.push(inw);
+    });
+
+    const results = outwards.map(entry => {
+      const originalItems = JSON.parse(entry.items_json || '[]');
+      const returnedInwards = inwardGroups.get(String(entry.id)) || [];
+
+      const balanceItems = originalItems.map((item: any) => {
+        let totalReturnedQty = 0;
+        const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
+
+        returnedInwards.forEach((inw: any) => {
+          const inwItems = JSON.parse(inw.items_json || '[]');
+          const matchingItem = inwItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
+          if (matchingItem) {
+            totalReturnedQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+          }
+        });
+
+        const original = parseFloat(item.quantity || item.qty || '0');
+        const rem = Math.max(0, original - totalReturnedQty);
+
+        return {
+          ...item,
+          originalQty: original,
+          returnedQty: totalReturnedQty,
+          remainingQty: rem
+        };
+      });
+
+      const hasBalance = balanceItems.some((item: any) => item.remainingQty > 0);
+
+      return {
+        id: entry.id,
+        outwardNo: entry.outward_no,
+        vendorName: entry.vendor_name,
+        date: entry.date,
+        processName: entry.process_name,
+        challanNo: entry.challan_no,
+        status: entry.status,
+        items: balanceItems,
+        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0),
+        hasBalance
+      };
+    }).filter(r => r.hasBalance);
+
+    res.json(results);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to calculate outward balance', detail: error.message });
+  }
+};

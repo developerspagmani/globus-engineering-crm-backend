@@ -146,14 +146,15 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       const parts = rawInvoiceNos.split(',').map(n => n.trim()).filter(n => n !== '');
       const numericParts = parts.map(n => parseInt(n)).filter(n => !isNaN(n));
       
-      filteredWhere.AND.push({ 
-        OR: [
-          { invoice_no: { in: numericParts } }, 
-          { id: { in: numericParts } },
-          // Also check as strings just in case the IDs in DB are not parsed as integers
-          { company_id: { in: parts } } // This is a fallback to catch anything missed by type casting
-        ] 
-      });
+      const invoiceConditions = [
+        { invoice_no: { in: numericParts } }, 
+        { id: { in: numericParts } }
+      ];
+
+      // When specific invoices are requested (e.g. for a voucher view), we bypass the strict company filter
+      // to ensure linked records are visible even if they have company_id mismatches (migrated data).
+      filteredWhere.AND = filteredWhere.AND.filter((c: any) => !c.company_id);
+      filteredWhere.AND.push({ OR: invoiceConditions });
     }
 
     // 4. Execute Queries
@@ -288,6 +289,13 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
   const finalGrandTotal = parseFloat(String(grandTotal || '0'));
   const finalTaxTotal = finalGrandTotal - finalSubTotal;
 
+  // Ghost Trap: Block 0.00 invoices from background triggers
+  if (!finalGrandTotal || finalGrandTotal <= 0) {
+     return res.status(400).json({ 
+        error: 'Cannot create an invoice with 0.00 amount. Please ensure prices and quantities are entered before saving.' 
+     });
+  }
+
   const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
 
   const user = req.user;
@@ -350,38 +358,36 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         }
       });
 
-      // Special Logic: If "Both", automatically create a Delivery Challan for "Without Process" items
-      if (billType === 'Both') {
-        const wopItems = items.filter((it: any) => it.wopQty > 0).map((it: any) => ({
-          ...it,
-          quantity: it.wopQty, // Map wopQty to quantity for the Challan
-          bill_type: 'without_process'
-        }));
 
-        if (wopItems.length > 0) {
-          await tx.challan.create({
-            data: {
-              id: crypto.randomUUID(),
-              challan_no: String(delNo || invNo),
-              party_id: String(customerId),
-              party_name: String(customerName),
-              party_type: 'customer',
-              company_id: finalCompanyId,
-              date: date ? new Date(date) : new Date(),
-              type: 'delivery',
-              status: 'COMPLETED',
-              items_json: JSON.stringify(wopItems),
-              vehicle_no: String(dc_no || dcNo || '').trim() || null
-            }
-          });
-        }
-      }
 
       if (inwardId) {
-        await tx.inwardEntry.update({
-          where: { id: String(inwardId) },
-          data: { status: 'partial' } // Changed from 'completed' to support multiple invoices
-        });
+        // 1. Fetch current inward to see total original qty
+        const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
+        if (entry) {
+          const originalItems = JSON.parse(entry.items_json || '[]');
+          const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
+
+          // 2. Fetch all invoices for this inward (including the one just created or being created)
+          // Since we are in a transaction, we can find existing ones and add current
+          const otherInvoices = await (tx as any).legacyInvoice.findMany({
+            where: { inward_id: String(inwardId) }
+          });
+          
+          let totalBilled = 0;
+          [...otherInvoices, newInvoice].forEach((inv: any) => {
+            const invItems = JSON.parse(inv.items_json || '[]');
+            invItems.forEach((ii: any) => {
+              totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+            });
+          });
+
+          // 3. Update status based on actual math
+          const isFinished = (totalOriginal - totalBilled) <= 0.5; // Use 0.5 for rounding safety
+          await tx.inwardEntry.update({
+            where: { id: String(inwardId) },
+            data: { status: isFinished ? 'completed' : 'pending' }
+          });
+        }
       }
 
       // 3. Update Ledger with running balance
@@ -494,6 +500,35 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
         ...taxUpdate
       }
     });
+
+    // Smart Status Update for Inward if linked
+    if (inwardId) {
+       await prisma.$transaction(async (tx) => {
+          const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
+          if (entry) {
+             const originalItems = JSON.parse(entry.items_json || '[]');
+             const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
+
+             const allInvoices = await (tx as any).legacyInvoice.findMany({
+                where: { inward_id: String(inwardId) }
+             });
+
+             let totalBilled = 0;
+             allInvoices.forEach((inv: any) => {
+                const invItems = JSON.parse(inv.items_json || '[]');
+                invItems.forEach((ii: any) => {
+                   totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+                });
+             });
+
+             const isFinished = (totalOriginal - totalBilled) <= 0.5;
+             await tx.inwardEntry.update({
+                where: { id: String(inwardId) },
+                data: { status: isFinished ? 'completed' : 'pending' }
+             });
+          }
+       });
+    }
 
     // Logging Audit
     await logAudit({
