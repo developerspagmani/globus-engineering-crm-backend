@@ -109,7 +109,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         let totalReturnedFromVendor = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
 
-        // 1. Add Invoiced quantities (Billed to customer)
+        // 1. Add Invoiced quantities (Financial Billing)
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
@@ -118,7 +118,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
           }
         });
 
-        // 2. Add Outward quantities (Sent to Vendor OR Customer)
+        // 2. Add Outward quantities (Physical Shipping)
         outwardsForThisEntry.forEach((ow: any) => {
           const owItems = JSON.parse(ow.items_json || '[]');
           const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
@@ -127,13 +127,18 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
               totalSentToVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             } else {
               // Standard Customer Delivery
-              totalInvoiced += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+              totalReturnedFromVendor += 0; // Not a vendor return
+              totalReturnedFromVendor -= 0; 
+              // We track this as physical shipment
+              (item as any).shippedQty = ((item as any).shippedQty || 0) + parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             }
           }
         });
 
-        // 3. Find Inwards FROM Vendors that link to Outwards to Vendors linked to THIS Inward
-        // This calculates the "Returns" from the job work loop
+        const totalShippedToCustomer = (item as any).shippedQty || 0;
+        delete (item as any).shippedQty; // Clean up temp property
+
+        // 3. Find Inwards FROM Vendors
         const relatedVendorInwards = entries.filter((ei: any) => 
           ei.party_type === 'vendor' && 
           outwardsForThisEntry.some(ow => ow.id === ei.outward_id)
@@ -149,16 +154,24 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
         const originalQty = parseFloat(item.quantity || item.qty || '0');
         const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
-        const inHouseQty = Math.max(0, originalQty - totalInvoiced - currentlyAtVendor);
+        
+        // Physical Balance: Only affected by Outwards and Vendor Job Work
+        const shippingBalance = Math.max(0, originalQty - totalShippedToCustomer - currentlyAtVendor);
+        
+        // Billing Balance: Only affected by Invoices and Vendor Job Work
+        const billingBalance = Math.max(0, originalQty - totalInvoiced - currentlyAtVendor);
 
         return {
           ...item,
           originalQty,
           invoicedQty: totalInvoiced,
+          shippedQty: totalShippedToCustomer,
           atVendorQty: currentlyAtVendor,
           returnedQty: totalReturnedFromVendor,
-          remainingQty: inHouseQty, // What is available to be billed/sent
-          inHouseQty: inHouseQty
+          remainingQty: shippingBalance, // Default to shipping for logistics lists
+          remainingShippingQty: shippingBalance,
+          remainingBillingQty: billingBalance,
+          inHouseQty: shippingBalance
         };
       });
 
@@ -396,10 +409,13 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
             if (ow.party_type === 'vendor') {
               totalSentToVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             } else {
-              totalInvoicedQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+              (item as any).shippedQty = ((item as any).shippedQty || 0) + parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             }
           }
         });
+
+        const totalShippedToCustomer = (item as any).shippedQty || 0;
+        delete (item as any).shippedQty;
 
         // Find Vendor Returns
         const vendorInwardsForThisCustomer = inwards.filter(i => 
@@ -417,16 +433,21 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
 
         const original = parseFloat(item.quantity || item.qty || '0');
         const currentlyAtVendor = Math.max(0, totalSentToVendorQty - totalReturnedFromVendorQty);
-        const rem = Math.max(0, original - totalInvoicedQty - currentlyAtVendor);
+        
+        const shipBal = Math.max(0, original - totalShippedToCustomer - currentlyAtVendor);
+        const billBal = Math.max(0, original - totalInvoicedQty - currentlyAtVendor);
 
         return {
           ...item,
           originalQty: original,
           invoicedQty: totalInvoicedQty,
+          shippedQty: totalShippedToCustomer,
           sentToVendor: currentlyAtVendor,
           returnedQty: totalReturnedFromVendorQty,
-          remainingQty: rem,
-          inHouseQty: rem
+          remainingQty: shipBal,
+          remainingShippingQty: shipBal,
+          remainingBillingQty: billBal,
+          inHouseQty: shipBal
         };
       });
 
@@ -490,7 +511,8 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     });
 
     const balanceItems = items.map((item: any) => {
-      let totalDeducted = 0;
+      let totalBilled = 0;
+      let totalShipped = 0;
       const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
 
       // Add Invoiced quantities
@@ -498,7 +520,7 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
         const invItems = JSON.parse(inv.items_json || '[]');
         const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
         if (matchingItem) {
-          totalDeducted += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
+          totalBilled += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
         }
       });
 
@@ -507,16 +529,26 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
         if (matchingItem) {
-          totalDeducted += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+          if (ow.party_type === 'vendor') {
+            // Vendor job work doesn't deduct from final balance in this simple view but we keep it consistent
+          } else {
+            totalShipped += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+          }
         }
       });
 
       const originalQty = parseFloat(item.quantity || item.qty || '0');
+      const shipBal = Math.max(0, originalQty - totalShipped);
+      const billBal = Math.max(0, originalQty - totalBilled);
+
       return {
         ...item,
         originalQty,
-        deductedQty: totalDeducted,
-        remainingQty: Math.max(0, originalQty - totalDeducted)
+        billedQty: totalBilled,
+        shippedQty: totalShipped,
+        remainingQty: shipBal,
+        remainingShippingQty: shipBal,
+        remainingBillingQty: billBal
       };
     });
 
