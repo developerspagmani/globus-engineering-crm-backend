@@ -302,69 +302,73 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
         }
       });
 
-      // 3. If there's a positive delta, update Invoices and Ledger
-      if (deltaAmount > 0.01 && type === 'receipt' && party_type === 'customer') {
-        const invNumbers = reference_no 
-          ? String(reference_no)
-              .split(',')
-              .map((s: string) => s.trim().split('(')[0].trim()) 
-              .filter(Boolean) 
-          : [];
+      // 3. If there's a significant delta, update Invoices and Ledger
+      if (Math.abs(deltaAmount) > 0.01) {
         
-        if (invNumbers.length > 0) {
-          const invNumsAsInts = invNumbers.map((n: string) => {
-            const onlyDigits = n.replace(/\D/g, '');
-            return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
-          }).filter((n: number) => !isNaN(n));
+        // Update Invoice balances (Only for Customer Receipts)
+        if (type === 'receipt' && party_type === 'customer' && deltaAmount > 0) {
+          const invNumbers = reference_no 
+            ? String(reference_no)
+                .split(',')
+                .map((s: string) => s.trim().split('(')[0].trim()) 
+                .filter(Boolean) 
+            : [];
+          
+          if (invNumbers.length > 0) {
+            const invNumsAsInts = invNumbers.map((n: string) => {
+              const onlyDigits = n.replace(/\D/g, '');
+              return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
+            }).filter((n: number) => !isNaN(n));
 
-          const invoices = await (tx as any).legacyInvoice.findMany({
-            where: {
-              AND: [
-                {
-                  OR: [
-                    { id: { in: invNumsAsInts } },
-                    { invoice_no: { in: invNumsAsInts } },
-                    { dc_no: { in: invNumbers } }
-                  ]
-                },
-                {
-                  OR: [
-                    { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined },
-                    { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }
-                  ]
-                }
-              ]
-            }
-          });
-
-          let remainingAmount = deltaAmount;
-          for (const inv of invoices) {
-            if (remainingAmount <= 0) break;
-            
-            const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-            const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
-            
-            const currentGrandTotal = parseFloat(cleanGrand) || 0;
-            const currentPaidAmount = parseFloat(cleanPaid) || 0;
-            
-            const balanceDue = currentGrandTotal - currentPaidAmount;
-            if (balanceDue <= 0.1) continue; 
-
-            const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
-            const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
-            
-            await (tx as any).legacyInvoice.update({
-              where: { id: inv.id },
-              data: {
-                paid_amount: String(newPaidAmount),
-                status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED'
+            const invoices = await (tx as any).legacyInvoice.findMany({
+              where: {
+                AND: [
+                  {
+                    OR: [
+                      { id: { in: invNumsAsInts } },
+                      { invoice_no: { in: invNumsAsInts } },
+                      { dc_no: { in: invNumbers } }
+                    ]
+                  },
+                  {
+                    OR: [
+                      { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined },
+                      { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }
+                    ]
+                  }
+                ]
               }
             });
-            remainingAmount -= paymentForThisInvoice;
+
+            let remainingAmount = deltaAmount;
+            for (const inv of invoices) {
+              if (remainingAmount <= 0) break;
+              
+              const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
+              const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
+              
+              const currentGrandTotal = parseFloat(cleanGrand) || 0;
+              const currentPaidAmount = parseFloat(cleanPaid) || 0;
+              
+              const balanceDue = currentGrandTotal - currentPaidAmount;
+              if (balanceDue <= 0.1) continue; 
+
+              const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
+              const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
+              
+              await (tx as any).legacyInvoice.update({
+                where: { id: inv.id },
+                data: {
+                  paid_amount: String(newPaidAmount),
+                  status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED'
+                }
+              });
+              remainingAmount -= paymentForThisInvoice;
+            }
           }
         }
 
-        // UPDATE LEDGER for the delta
+        // UPDATE LEDGER (For any party_id)
         if (party_id) {
           const lastEntry = await (tx.ledgerEntry as any).findFirst({
              where: {
@@ -375,6 +379,10 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
           });
 
           const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+          
+          // Accounting Logic:
+          // For Customers: Receipt reduces balance (-)
+          // For Vendors: Payment reduces balance (-)
           const newBalance = lastBalance - deltaAmount; 
 
           await (tx.ledgerEntry as any).create({
@@ -390,7 +398,7 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
               type: type === 'receipt' ? 'credit' : 'debit',
               amount: deltaAmount,
               balance: newBalance,
-              description: `Consolidated Payment: ${deltaAmount} added to VCH ${updatedVoucher.voucher_no}`,
+              description: `Consolidated ${type === 'receipt' ? 'Receipt' : 'Payment'}: ₹${Math.abs(deltaAmount)} update to VCH ${updatedVoucher.voucher_no}`,
               reference_id: updatedVoucher.voucher_no || updatedVoucher.id
             }
           });

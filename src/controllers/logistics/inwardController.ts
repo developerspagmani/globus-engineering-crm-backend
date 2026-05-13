@@ -104,33 +104,61 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
 
       const balanceItems = items.map((item: any) => {
-        let totalDeducted = 0;
+        let totalInvoiced = 0;
+        let totalSentToVendor = 0;
+        let totalReturnedFromVendor = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
 
-        // Add Invoiced quantities
+        // 1. Add Invoiced quantities (Billed to customer)
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            totalDeducted += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
+            totalInvoiced += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
           }
         });
 
-        // Add Outward quantities
+        // 2. Add Outward quantities (Sent to Vendor OR Customer)
         outwardsForThisEntry.forEach((ow: any) => {
           const owItems = JSON.parse(ow.items_json || '[]');
           const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            totalDeducted += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+            if (ow.party_type === 'vendor') {
+              totalSentToVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+            } else {
+              // Standard Customer Delivery
+              totalInvoiced += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+            }
+          }
+        });
+
+        // 3. Find Inwards FROM Vendors that link to Outwards to Vendors linked to THIS Inward
+        // This calculates the "Returns" from the job work loop
+        const relatedVendorInwards = entries.filter((ei: any) => 
+          ei.party_type === 'vendor' && 
+          outwardsForThisEntry.some(ow => ow.id === ei.outward_id)
+        );
+
+        relatedVendorInwards.forEach((vi: any) => {
+          const viItems = JSON.parse(vi.items_json || '[]');
+          const matchingItem = viItems.find((vii: any) => (vii.description || vii.item_name || '').toLowerCase() === itemIdentifier);
+          if (matchingItem) {
+            totalReturnedFromVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
           }
         });
 
         const originalQty = parseFloat(item.quantity || item.qty || '0');
+        const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
+        const inHouseQty = Math.max(0, originalQty - totalInvoiced - currentlyAtVendor);
+
         return {
           ...item,
           originalQty,
-          deductedQty: totalDeducted,
-          remainingQty: Math.max(0, originalQty - totalDeducted)
+          invoicedQty: totalInvoiced,
+          atVendorQty: currentlyAtVendor,
+          returnedQty: totalReturnedFromVendor,
+          remainingQty: inHouseQty, // What is available to be billed/sent
+          inHouseQty: inHouseQty
         };
       });
 
@@ -349,36 +377,54 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
 
       const balanceItems = originalItems.map((item: any) => {
         let totalInvoicedQty = 0;
+        let totalSentToVendorQty = 0;
+        let totalReturnedFromVendorQty = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
 
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            const q = parseFloat(matchingItem.qty || matchingItem.quantity || '0');
-            const w = parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0');
-            totalInvoicedQty += (q + w);
+            totalInvoicedQty += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
           }
         });
 
-        let totalSentToVendorQty = 0;
         outwardsForThisEntry.forEach((ow: any) => {
           const owItems = JSON.parse(ow.items_json || '[]');
           const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            totalSentToVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+            if (ow.party_type === 'vendor') {
+              totalSentToVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+            } else {
+              totalInvoicedQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
+            }
+          }
+        });
+
+        // Find Vendor Returns
+        const vendorInwardsForThisCustomer = inwards.filter(i => 
+           i.party_type === 'vendor' && 
+           outwardsForThisEntry.some(ow => ow.id === i.outward_id)
+        );
+
+        vendorInwardsForThisCustomer.forEach((vi: any) => {
+          const viItems = JSON.parse(vi.items_json || '[]');
+          const matchingItem = viItems.find((vii: any) => (vii.description || vii.item_name || '').toLowerCase() === itemIdentifier);
+          if (matchingItem) {
+            totalReturnedFromVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
           }
         });
 
         const original = parseFloat(item.quantity || item.qty || '0');
-        const inHouse = original - totalInvoicedQty - totalSentToVendorQty;
-        const rem = Math.max(0, inHouse);
+        const currentlyAtVendor = Math.max(0, totalSentToVendorQty - totalReturnedFromVendorQty);
+        const rem = Math.max(0, original - totalInvoicedQty - currentlyAtVendor);
 
         return {
           ...item,
           originalQty: original,
           invoicedQty: totalInvoicedQty,
-          sentToVendor: totalSentToVendorQty,
+          sentToVendor: currentlyAtVendor,
+          returnedQty: totalReturnedFromVendorQty,
           remainingQty: rem,
           inHouseQty: rem
         };
