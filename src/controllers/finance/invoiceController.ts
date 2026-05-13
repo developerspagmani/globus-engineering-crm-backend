@@ -403,6 +403,91 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         }
       }
 
+      // Add Ledger Entry for Invoice
+      let partyId = customerId ? String(customerId) : '';
+      let partyName = customerName || 'Unknown';
+      let partyType = 'customer';
+      let ledgerType = 'debit'; // Sales invoice is debit
+
+      if (inwardId) {
+        const inward = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
+        if (inward) {
+          if (inward.party_type === 'vendor') {
+            partyId = inward.vendor_id || '';
+            partyName = inward.vendor_name || 'Unknown Vendor';
+            partyType = 'vendor';
+            ledgerType = 'credit'; // Vendor invoice is credit
+          } else {
+            partyId = inward.customer_id || partyId;
+            partyName = inward.customer_name || partyName;
+            partyType = 'customer';
+            ledgerType = 'debit';
+          }
+        }
+      } else if (partyId) {
+        const isNumeric = /^\d+$/.test(partyId);
+        if (!isNumeric) {
+          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
+          if (vendor) {
+            partyType = 'vendor';
+            ledgerType = 'credit';
+            partyName = vendor.name || partyName;
+          }
+        } else {
+          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
+          if (vendor) {
+            partyType = 'vendor';
+            ledgerType = 'credit';
+            partyName = vendor.name || partyName;
+          } else {
+            const customer = await tx.legacyCustomer.findUnique({ where: { id: parseInt(partyId) } });
+            if (customer) {
+              partyType = 'customer';
+              ledgerType = 'debit';
+              partyName = customer.customer_name || partyName;
+            }
+          }
+        }
+      }
+
+      if (partyId && finalGrandTotal > 0) {
+        const lastEntry = await (tx.ledgerEntry as any).findFirst({
+          where: {
+            party_id: String(partyId),
+            company_id: finalCompanyId ? String(finalCompanyId) : undefined
+          },
+          orderBy: { created_at: 'desc' }
+        });
+
+        const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+        let newBalance = lastBalance;
+        if (partyType === 'vendor') {
+          newBalance = ledgerType === 'credit' ? (lastBalance + finalGrandTotal) : (lastBalance - finalGrandTotal);
+        } else {
+          newBalance = ledgerType === 'debit' ? (lastBalance + finalGrandTotal) : (lastBalance - finalGrandTotal);
+        }
+
+        await (tx.ledgerEntry as any).create({
+          data: {
+            id: crypto.randomUUID(),
+            party_id: String(partyId),
+            party_name: partyName,
+            party_type: partyType,
+            company_id: finalCompanyId ? String(finalCompanyId) : null,
+            date: date ? new Date(date) : new Date(),
+            vch_type: 'INVOICE',
+            vch_no: String(newInvoice.invoice_no || newInvoice.id),
+            type: ledgerType,
+            amount: finalGrandTotal,
+            balance: newBalance,
+            description: partyType === 'vendor' 
+              ? `Purchase Invoice: ${newInvoice.invoice_no || newInvoice.id}`
+              : `Sales Invoice: ${newInvoice.invoice_no || newInvoice.id}`,
+            reference_id: String(newInvoice.id)
+          }
+        });
+      }
+
       return newInvoice;
     }, {
       maxWait: 15000,
@@ -455,62 +540,178 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
     };
   }
 
+  const user = req.user;
+  const finalCompanyId = user?.company_id ? String(user.company_id).toLowerCase() : null;
+
   try {
-    const invoice = await (prisma as any).legacyInvoice.update({
-      where: { id: parseInt(String(id)) },
-      data: {
-        invoice_date: date ? new Date(date) : undefined,
-        due_date: dueDate ? new Date(dueDate) : undefined,
-        customer_id: customerId ? parseInt(String(customerId)) : undefined,
-        customer_name: customerName,
-        address,
-        total: subTotal ? String(subTotal) : undefined,
-        grand_total: grandTotal ? String(grandTotal) : undefined,
-        items_json: items ? JSON.stringify(items) : undefined,
-        bill_type: billType === 'With Process' ? 'with_process' :
-          billType === 'Without Process' ? 'without_process' :
-            billType === 'Both' ? 'both' : billType,
-        inward_id: inwardId ? String(inwardId) : undefined,
-        po_no: req.body.po_no || req.body.poNo,
-        po_date: (req.body.po_date || req.body.poDate) ? new Date(req.body.po_date || req.body.poDate) : undefined,
-        dc_no: req.body.dc_no || req.body.dcNo,
-        dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
-        status: status?.toUpperCase(),
-        gstin: gstin,
-        state: state,
-        notes: notes,
-        ...taxUpdate
+    const invoiceIdNum = parseInt(String(id));
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      const oldInvoice = await (tx as any).legacyInvoice.findUnique({
+        where: { id: invoiceIdNum }
+      });
+
+      if (!oldInvoice) {
+        throw new Error('Invoice not found');
       }
-    });
 
-    // Smart Status Update for Inward if linked
-    if (inwardId) {
-       await prisma.$transaction(async (tx) => {
-          const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
-          if (entry) {
-             const originalItems = JSON.parse(entry.items_json || '[]');
-             const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
+      const updatedInvoice = await (tx as any).legacyInvoice.update({
+        where: { id: invoiceIdNum },
+        data: {
+          invoice_date: date ? new Date(date) : undefined,
+          due_date: dueDate ? new Date(dueDate) : undefined,
+          customer_id: customerId ? parseInt(String(customerId)) : undefined,
+          customer_name: customerName,
+          address,
+          total: subTotal ? String(subTotal) : undefined,
+          grand_total: grandTotal ? String(grandTotal) : undefined,
+          items_json: items ? JSON.stringify(items) : undefined,
+          bill_type: billType === 'With Process' ? 'with_process' :
+            billType === 'Without Process' ? 'without_process' :
+              billType === 'Both' ? 'both' : billType,
+          inward_id: inwardId ? String(inwardId) : undefined,
+          po_no: req.body.po_no || req.body.poNo,
+          po_date: (req.body.po_date || req.body.poDate) ? new Date(req.body.po_date || req.body.poDate) : undefined,
+          dc_no: req.body.dc_no || req.body.dcNo,
+          dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
+          status: status?.toUpperCase(),
+          gstin: gstin,
+          state: state,
+          notes: notes,
+          ...taxUpdate
+        }
+      });
 
-             const allInvoices = await (tx as any).legacyInvoice.findMany({
-                where: { inward_id: String(inwardId) }
-             });
+      // Smart Status Update for Inward if linked
+      const effectiveInwardId = inwardId !== undefined ? inwardId : updatedInvoice.inward_id;
+      if (effectiveInwardId) {
+        const entry = await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } });
+        if (entry) {
+          const originalItems = JSON.parse(entry.items_json || '[]');
+          const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
 
-             let totalBilled = 0;
-             allInvoices.forEach((inv: any) => {
-                const invItems = JSON.parse(inv.items_json || '[]');
-                invItems.forEach((ii: any) => {
-                   totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
-                });
-             });
+          const allInvoices = await (tx as any).legacyInvoice.findMany({
+            where: { inward_id: String(effectiveInwardId) }
+          });
 
-             const isFinished = (totalOriginal - totalBilled) <= 0.5;
-             await tx.inwardEntry.update({
-                where: { id: String(inwardId) },
-                data: { status: isFinished ? 'completed' : 'pending' }
-             });
+          let totalBilled = 0;
+          allInvoices.forEach((inv: any) => {
+            const invItems = JSON.parse(inv.items_json || '[]');
+            invItems.forEach((ii: any) => {
+              totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+            });
+          });
+
+          const isFinished = (totalOriginal - totalBilled) <= 0.5;
+          await tx.inwardEntry.update({
+            where: { id: String(effectiveInwardId) },
+            data: { status: isFinished ? 'completed' : 'pending' }
+          });
+        }
+      }
+
+      // Update ledger entry for the invoice
+      await (tx.ledgerEntry as any).deleteMany({
+        where: {
+          reference_id: String(updatedInvoice.id),
+          vch_type: 'INVOICE'
+        }
+      });
+
+      const actualGrandTotal = finalGrandTotal !== undefined ? finalGrandTotal : parseFloat(String(updatedInvoice.grand_total || '0').replace(/[^\d.]/g, ''));
+      const actualCustomerId = customerId !== undefined ? customerId : updatedInvoice.customer_id;
+      const actualCustomerName = customerName !== undefined ? customerName : updatedInvoice.customer_name;
+      const actualDate = date ? new Date(date) : updatedInvoice.invoice_date;
+
+      let partyId = actualCustomerId ? String(actualCustomerId) : '';
+      let partyName = actualCustomerName || 'Unknown';
+      let partyType = 'customer';
+      let ledgerType = 'debit';
+
+      if (effectiveInwardId) {
+        const inward = await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } });
+        if (inward) {
+          if (inward.party_type === 'vendor') {
+            partyId = inward.vendor_id || '';
+            partyName = inward.vendor_name || 'Unknown Vendor';
+            partyType = 'vendor';
+            ledgerType = 'credit';
+          } else {
+            partyId = inward.customer_id || partyId;
+            partyName = inward.customer_name || partyName;
+            partyType = 'customer';
+            ledgerType = 'debit';
           }
-       });
-    }
+        }
+      } else if (partyId) {
+        const isNumeric = /^\d+$/.test(partyId);
+        if (!isNumeric) {
+          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
+          if (vendor) {
+            partyType = 'vendor';
+            ledgerType = 'credit';
+            partyName = vendor.name || partyName;
+          }
+        } else {
+          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
+          if (vendor) {
+            partyType = 'vendor';
+            ledgerType = 'credit';
+            partyName = vendor.name || partyName;
+          } else {
+            const customer = await tx.legacyCustomer.findUnique({ where: { id: parseInt(partyId) } });
+            if (customer) {
+              partyType = 'customer';
+              ledgerType = 'debit';
+              partyName = customer.customer_name || partyName;
+            }
+          }
+        }
+      }
+
+      if (partyId && actualGrandTotal > 0) {
+        const lastEntry = await (tx.ledgerEntry as any).findFirst({
+          where: {
+            party_id: String(partyId),
+            company_id: finalCompanyId ? String(finalCompanyId) : undefined
+          },
+          orderBy: { created_at: 'desc' }
+        });
+
+        const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+        let newBalance = lastBalance;
+        if (partyType === 'vendor') {
+          newBalance = ledgerType === 'credit' ? (lastBalance + actualGrandTotal) : (lastBalance - actualGrandTotal);
+        } else {
+          newBalance = ledgerType === 'debit' ? (lastBalance + actualGrandTotal) : (lastBalance - actualGrandTotal);
+        }
+
+        await (tx.ledgerEntry as any).create({
+          data: {
+            id: crypto.randomUUID(),
+            party_id: String(partyId),
+            party_name: partyName,
+            party_type: partyType,
+            company_id: finalCompanyId ? String(finalCompanyId) : null,
+            date: actualDate ? new Date(actualDate) : new Date(),
+            vch_type: 'INVOICE',
+            vch_no: String(updatedInvoice.invoice_no || updatedInvoice.id),
+            type: ledgerType,
+            amount: actualGrandTotal,
+            balance: newBalance,
+            description: partyType === 'vendor' 
+              ? `Purchase Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`
+              : `Sales Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`,
+            reference_id: String(updatedInvoice.id)
+          }
+        });
+      }
+
+      return updatedInvoice;
+    }, {
+      maxWait: 15000,
+      timeout: 45000
+    });
 
     // Logging Audit
     await logAudit({
@@ -532,8 +733,19 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
 export const deleteInvoice = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
-    await (prisma as any).legacyInvoice.delete({
-      where: { id: parseInt(String(id)) }
+    await prisma.$transaction(async (tx) => {
+      // Delete any ledger entries for this invoice first
+      await (tx.ledgerEntry as any).deleteMany({
+        where: {
+          reference_id: String(id),
+          vch_type: 'INVOICE'
+        }
+      });
+
+      // Delete the invoice itself
+      await (tx as any).legacyInvoice.delete({
+        where: { id: parseInt(String(id)) }
+      });
     });
 
     // Logging Audit

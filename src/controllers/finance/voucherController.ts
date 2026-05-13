@@ -135,8 +135,8 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         }
       });
 
-      // 2. If it's a receipt from a customer, update the Invoice and Ledger
-      if (type === 'receipt' && party_type === 'customer') {
+      // 2. If it's a receipt from a customer or a payment to a vendor, update the Invoice and Ledger
+      if ((type === 'receipt' && party_type === 'customer') || (type === 'payment' && party_type === 'vendor')) {
         // Extract invoice numbers/IDs from the reference string (handles "INV-001 (5000)" format)
         const invNumbers = reference_no 
           ? String(reference_no)
@@ -203,6 +203,13 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
 
       // 3. UPDATE LEDGER (For both Customers and Vendors)
       if (party_id) {
+        // Delete any existing ledger entries for this voucher reference first
+        await (tx.ledgerEntry as any).deleteMany({
+          where: {
+            reference_id: voucher.voucher_no || voucher.id
+          }
+        });
+
         const lastEntry = await (tx.ledgerEntry as any).findFirst({
            where: {
              party_id: String(party_id),
@@ -212,17 +219,18 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         });
 
         const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-        const isReceipt = type === 'receipt'; // Receipt (Credit for Cust, Debit for Vendor?? No, Receipt is money in)
         
-        // Accounting Logic for Vouchers:
-        // Customer Receipt: Bal - Amt (Credit)
-        // Vendor Payment: Bal - Amt (Debit) -> Wait, if we owe vendor 1000 (Cr) and pay 200 (Dr), bal becomes 800 (Cr).
-        // Standardizing: 
-        // Customer: Receipt = Credit (-), Invoice = Debit (+)
-        // Vendor: Payment = Debit (-), Purchase = Credit (+)
-        
-        const change = finalAmount;
-        const newBalance = lastBalance - change; 
+        let entryType = type === 'receipt' ? 'credit' : 'debit';
+        let change = finalAmount;
+        let newBalance = lastBalance;
+
+        if (party_type === 'customer') {
+          newBalance = type === 'receipt' ? (lastBalance - change) : (lastBalance + change);
+        } else if (party_type === 'vendor') {
+          // Vendor payment (OUT) is debit (reduces balance), receipt (IN) is credit (increases balance)
+          entryType = type === 'payment' ? 'debit' : 'credit';
+          newBalance = type === 'payment' ? (lastBalance - change) : (lastBalance + change);
+        }
 
         await (tx.ledgerEntry as any).create({
           data: {
@@ -234,13 +242,77 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             date: date ? new Date(date) : new Date(),
             vch_type: type.toUpperCase(), // RECEIPT or PAYMENT
             vch_no: voucher.voucher_no || voucher.id,
-            type: type === 'receipt' ? 'credit' : 'debit',
+            type: entryType,
             amount: finalAmount,
             balance: newBalance,
             description: `${type.charAt(0).toUpperCase() + type.slice(1)}: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `Ref: ${reference_no}` : ''}`,
             reference_id: voucher.voucher_no || voucher.id
           }
         });
+
+        // Double-entry customer posting for Job Work Vendors
+        const selectedInwardId = inward_id || voucher.inward_id;
+        if (party_type === 'vendor' && selectedInwardId) {
+          const inwardEntry = await (tx as any).inwardEntry.findUnique({
+            where: { id: String(selectedInwardId) }
+          });
+          if (inwardEntry) {
+            let targetCustomerId = inwardEntry.customer_id;
+            let targetCustomerName = inwardEntry.customer_name;
+
+            // Trace to customer if customer_id is missing or empty on a vendor inward
+            if ((!targetCustomerId || targetCustomerId.trim() === '') && inwardEntry.outward_id) {
+              const outwardEntry = await (tx as any).outwardEntry.findUnique({
+                where: { id: String(inwardEntry.outward_id) }
+              });
+              if (outwardEntry) {
+                if (outwardEntry.customer_id && outwardEntry.customer_id.trim() !== '') {
+                  targetCustomerId = outwardEntry.customer_id;
+                  targetCustomerName = outwardEntry.customer_name;
+                } else if (outwardEntry.inward_id) {
+                  const originalInward = await (tx as any).inwardEntry.findUnique({
+                    where: { id: String(outwardEntry.inward_id) }
+                  });
+                  if (originalInward) {
+                    targetCustomerId = originalInward.customer_id;
+                    targetCustomerName = originalInward.customer_name;
+                  }
+                }
+              }
+            }
+
+            if (targetCustomerId && targetCustomerId.trim() !== '') {
+              const custLastEntry = await (tx.ledgerEntry as any).findFirst({
+                where: {
+                  party_id: String(targetCustomerId),
+                  company_id: finalCompanyId ? String(finalCompanyId) : undefined
+                },
+                orderBy: { created_at: 'desc' }
+              });
+              const custLastBalance = custLastEntry ? (custLastEntry.balance || 0) : 0;
+              // For Customer: a Debit increases their balance (since Customer owes us)
+              const custNewBalance = custLastBalance + finalAmount;
+
+              await (tx.ledgerEntry as any).create({
+                data: {
+                  id: crypto.randomUUID(),
+                  party_id: String(targetCustomerId),
+                  party_name: targetCustomerName || 'Customer',
+                  party_type: 'customer',
+                  company_id: finalCompanyId ? String(finalCompanyId) : null,
+                  date: date ? new Date(date) : new Date(),
+                  vch_type: 'JOURNAL',
+                  vch_no: voucher.voucher_no || voucher.id,
+                  type: 'debit',
+                  amount: finalAmount,
+                  balance: custNewBalance,
+                  description: `Processing Charge (Job Work Vendor: ${party_name || 'Vendor'}) for Inward: ${inwardEntry.inward_no || 'N/A'}`,
+                  reference_id: voucher.voucher_no || voucher.id
+                }
+              });
+            }
+          }
+        }
       }
 
       return voucher;
@@ -305,8 +377,8 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
       // 3. If there's a significant delta, update Invoices and Ledger
       if (Math.abs(deltaAmount) > 0.01) {
         
-        // Update Invoice balances (Only for Customer Receipts)
-        if (type === 'receipt' && party_type === 'customer' && deltaAmount > 0) {
+        // Update Invoice balances (For Customer Receipts and Vendor Payments)
+        if (((type === 'receipt' && party_type === 'customer') || (type === 'payment' && party_type === 'vendor')) && deltaAmount > 0) {
           const invNumbers = reference_no 
             ? String(reference_no)
                 .split(',')
@@ -367,41 +439,118 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
             }
           }
         }
+      }
 
-        // UPDATE LEDGER (For any party_id)
-        if (party_id) {
-          const lastEntry = await (tx.ledgerEntry as any).findFirst({
-             where: {
-               party_id: String(party_id),
-               company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined
-             },
-             orderBy: { created_at: 'desc' }
+      // 4. UPDATE LEDGER (For any party_id)
+      if (party_id) {
+        // Delete any existing ledger entries for this voucher reference first
+        await (tx.ledgerEntry as any).deleteMany({
+          where: {
+            reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+          }
+        });
+
+        const lastEntry = await (tx.ledgerEntry as any).findFirst({
+           where: {
+             party_id: String(party_id),
+             company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined
+           },
+           orderBy: { created_at: 'desc' }
+        });
+
+        const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+        
+        let entryType = type === 'receipt' ? 'credit' : 'debit';
+        let change = newAmount;
+        let newBalance = lastBalance;
+
+        if (party_type === 'customer') {
+          newBalance = type === 'receipt' ? (lastBalance - change) : (lastBalance + change);
+        } else if (party_type === 'vendor') {
+          // Vendor payment (OUT) is debit (reduces balance), receipt (IN) is credit (increases balance)
+          entryType = type === 'payment' ? 'debit' : 'credit';
+          newBalance = type === 'payment' ? (lastBalance - change) : (lastBalance + change);
+        }
+
+        await (tx.ledgerEntry as any).create({
+          data: {
+            id: crypto.randomUUID(),
+            party_id: String(party_id),
+            party_name: party_name || 'N/A',
+            party_type: party_type || 'customer',
+            company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : null,
+            date: date ? new Date(date) : new Date(),
+            vch_type: type.toUpperCase(),
+            vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
+            type: entryType,
+            amount: newAmount,
+            balance: newBalance,
+            description: `${type.charAt(0).toUpperCase() + type.slice(1)}: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `Ref: ${reference_no}` : ''}`,
+            reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+          }
+        });
+
+        // Double-entry customer posting for Job Work Vendors
+        const selectedInwardId = inward_id || updatedVoucher.inward_id;
+        if (party_type === 'vendor' && selectedInwardId) {
+          const inwardEntry = await (tx as any).inwardEntry.findUnique({
+            where: { id: String(selectedInwardId) }
           });
+          if (inwardEntry) {
+            let targetCustomerId = inwardEntry.customer_id;
+            let targetCustomerName = inwardEntry.customer_name;
 
-          const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-          
-          // Accounting Logic:
-          // For Customers: Receipt reduces balance (-)
-          // For Vendors: Payment reduces balance (-)
-          const newBalance = lastBalance - deltaAmount; 
-
-          await (tx.ledgerEntry as any).create({
-            data: {
-              id: crypto.randomUUID(),
-              party_id: String(party_id),
-              party_name: party_name || 'N/A',
-              party_type: party_type || 'customer',
-              company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : null,
-              date: date ? new Date(date) : new Date(),
-              vch_type: type.toUpperCase(),
-              vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
-              type: type === 'receipt' ? 'credit' : 'debit',
-              amount: deltaAmount,
-              balance: newBalance,
-              description: `Consolidated ${type === 'receipt' ? 'Receipt' : 'Payment'}: ₹${Math.abs(deltaAmount)} update to VCH ${updatedVoucher.voucher_no}`,
-              reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+            // Trace to customer if customer_id is missing or empty on a vendor inward
+            if ((!targetCustomerId || targetCustomerId.trim() === '') && inwardEntry.outward_id) {
+              const outwardEntry = await (tx as any).outwardEntry.findUnique({
+                where: { id: String(inwardEntry.outward_id) }
+              });
+              if (outwardEntry) {
+                if (outwardEntry.customer_id && outwardEntry.customer_id.trim() !== '') {
+                  targetCustomerId = outwardEntry.customer_id;
+                  targetCustomerName = outwardEntry.customer_name;
+                } else if (outwardEntry.inward_id) {
+                  const originalInward = await (tx as any).inwardEntry.findUnique({
+                    where: { id: String(outwardEntry.inward_id) }
+                  });
+                  if (originalInward) {
+                    targetCustomerId = originalInward.customer_id;
+                    targetCustomerName = originalInward.customer_name;
+                  }
+                }
+              }
             }
-          });
+
+            if (targetCustomerId && targetCustomerId.trim() !== '') {
+              const custLastEntry = await (tx.ledgerEntry as any).findFirst({
+                where: {
+                  party_id: String(targetCustomerId),
+                  company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined
+                },
+                orderBy: { created_at: 'desc' }
+              });
+              const custLastBalance = custLastEntry ? (custLastEntry.balance || 0) : 0;
+              const custNewBalance = custLastBalance + newAmount;
+
+              await (tx.ledgerEntry as any).create({
+                data: {
+                  id: crypto.randomUUID(),
+                  party_id: String(targetCustomerId),
+                  party_name: targetCustomerName || 'Customer',
+                  party_type: 'customer',
+                  company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : null,
+                  date: date ? new Date(date) : new Date(),
+                  vch_type: 'JOURNAL',
+                  vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
+                  type: 'debit',
+                  amount: newAmount,
+                  balance: custNewBalance,
+                  description: `Processing Charge (Job Work Vendor: ${party_name || 'Vendor'}) for Inward: ${inwardEntry.inward_no || 'N/A'}`,
+                  reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+                }
+              });
+            }
+          }
         }
       }
 
