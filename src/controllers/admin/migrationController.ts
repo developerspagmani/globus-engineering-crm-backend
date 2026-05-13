@@ -310,35 +310,16 @@ export const syncFinancials = async (req: Request, res: Response) => {
       const cId = inv.customer_id;
       if (!cId) continue;
 
+      // A. Invoice Debit Entry Removed as per voucher-only ledger policy.
+      // We still track the balance for local calculation if needed, 
+      // but we only record the impact of the payment (voucher).
       const currentBalance = customerBalances.get(cId) || 0;
-      const amount = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
       const paidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
       const cName = inv.customer_name || inv.customer?.customer_name || 'Unknown Customer';
 
-      // A. Add Invoice Debit Entry
-      const newBalanceAfterInvoice = currentBalance + amount;
-      customerBalances.set(cId, newBalanceAfterInvoice);
-
-      ledgerEntriesToCreate.push({
-        id: crypto.randomUUID(),
-        party_id: String(cId),
-        party_name: cName,
-        party_type: 'customer',
-        company_id: companyId,
-        date: inv.invoice_date || new Date(),
-        vch_type: 'INVOICE',
-        vch_no: String(inv.invoice_no || inv.id),
-        type: 'debit',
-        amount: amount,
-        balance: newBalanceAfterInvoice,
-        description: `Migrated Invoice: ${inv.invoice_no || inv.id}`,
-        reference_id: String(inv.id),
-        created_at: inv.app_created_at || new Date()
-      });
-
       // B. Add Payment Credit Entry & Voucher if paid
       if (paidAmount > 0) {
-        const finalBalance = newBalanceAfterInvoice - paidAmount;
+        const finalBalance = currentBalance - paidAmount;
         customerBalances.set(cId, finalBalance);
 
         const vchId = crypto.randomUUID();

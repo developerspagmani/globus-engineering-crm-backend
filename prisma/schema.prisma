@@ -368,6 +368,9 @@ model Challan {
   items_json  String?   @db.Text
   vehicle_no  String?   @db.VarChar(50)
   driver_name String?   @db.VarChar(255)
+  inward_id   String?   @db.VarChar(50)
+  inward_no   String?   @db.VarChar(50)
+  bill_type   String?   @db.VarChar(50)
   created_at  DateTime? @default(now()) @db.Timestamp(0)
 
   @@map("app_challans")
@@ -390,6 +393,9 @@ model Voucher {
   created_at   DateTime? @default(now()) @db.Timestamp(0)
   cheque_no    String?   @db.VarChar(50)
   tds_amount   Float?    @default(0)
+  inward_id    String?   @db.VarChar(50)
+  inward_no    String?   @db.VarChar(50)
+  items_json   String?   @db.Text
 
   @@map("app_vouchers")
 }

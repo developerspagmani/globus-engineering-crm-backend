@@ -64,4 +64,18 @@ if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
 }
 
 
+// 404 Catch-all - Ensure undefined routes return JSON
+app.use((req: express.Request, res: express.Response) => {
+  res.status(404).json({ error: `Route ${req.originalUrl} not found` });
+});
+
+// Global Error Handler - Ensure all errors return JSON (prevents "Unexpected token <" in frontend)
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('❌ Server Error:', err);
+  res.status(err.status || 500).json({
+    error: err.message || 'Internal Server Error',
+    detail: process.env.NODE_ENV === 'development' ? err.stack : undefined
+  });
+});
+
 export default app;

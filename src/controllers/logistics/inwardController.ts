@@ -43,7 +43,8 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
           { customer_name: { contains: search } },
           { vendor_name: { contains: search } },
           { dc_no: { contains: search } },
-          { challan_no: { contains: search } }
+          { challan_no: { contains: search } },
+          { po_reference: { contains: search } }
         ]
       });
     }

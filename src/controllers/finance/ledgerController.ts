@@ -45,7 +45,8 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
                 { company_id: String(companyId).toLowerCase() }
               ]
             } : {},
-            { date: { lt: new Date(dateFrom as string) } }
+            { date: { lt: new Date(dateFrom as string) } },
+            { vch_type: { notIn: ['INVOICE', 'OUTWARD'] } }
           ]
         }
       });
@@ -64,8 +65,12 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
       openingBalance = totalDr - totalCr; // Standard: Debit - Credit
     }
 
-    // 2. Fetch Entries
-    const entriesWhere: any = { AND: [...where.AND] };
+    const entriesWhere: any = { 
+      AND: [
+        ...where.AND,
+        { vch_type: { notIn: ['INVOICE', 'OUTWARD'] } } // Only include voucher-based entries
+      ] 
+    };
     if (dateFrom) entriesWhere.AND.push({ date: { gte: new Date(dateFrom as string) } });
     if (dateTo) entriesWhere.AND.push({ date: { lte: new Date(dateTo as string) } });
     if (search) {

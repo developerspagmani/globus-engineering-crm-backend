@@ -34,6 +34,10 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
       where.AND.push({ id: String(id) });
     }
 
+    if (req.query.inward_id) {
+      where.AND.push({ inward_id: String(req.query.inward_id) });
+    }
+
     if (search) {
       where.AND.push({
         OR: [
@@ -82,7 +86,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
     );
 
     res.json({
-      items: vouchers,
+      items: vouchers.map((v: any) => ({ ...v, items: JSON.parse(v.items_json || '[]') })),
       pagination: {
         total: totalCount,
         page,
@@ -97,7 +101,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 };
 
 export const createVoucher = async (req: AuthRequest, res: Response) => {
-  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status, tds_amount } = req.body;
+  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status, tds_amount, inward_id, inward_no, items } = req.body;
   const user = req.user;
   const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
@@ -124,7 +128,10 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           description_: description || '',
           company_id: finalCompanyId ? String(finalCompanyId) : null,
           status: status || 'posted',
-          tds_amount: parseFloat(String(tds_amount || '0')) || 0
+          tds_amount: parseFloat(String(tds_amount || '0')) || 0,
+          inward_id,
+          inward_no,
+          items_json: JSON.stringify(items || [])
         }
       });
 
@@ -244,34 +251,161 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
 
     res.status(201).json(result);
   } catch (error: any) {
-    res.status(500).json({ error: 'Failed to create voucher', message: error.message });
+    console.error('❌ PRISMA VOUCHER CREATE ERROR:', error);
+    res.status(500).json({ 
+      error: 'Failed to create voucher', 
+      message: error.message,
+      detail: error.code || 'UNKNOWN_ERROR'
+    });
   }
 };
 
 export const updateVoucher = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status, tds_amount } = req.body;
+  const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status, tds_amount, inward_id, inward_no, items } = req.body;
+
   try {
-    const voucher = await prisma.voucher.update({
-      where: { id: String(id) },
-      data: {
-        voucher_no,
-        date: date ? new Date(date) : undefined,
-        type,
-        party_id,
-        party_name,
-        party_type,
-        amount: amount ? parseFloat(String(amount)) : undefined,
-        payment_mode,
-        reference_no,
-        cheque_no,
-        description_: description,
-        status: status?.toLowerCase(),
-        tds_amount: tds_amount ? parseFloat(String(tds_amount)) : undefined
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Get the existing voucher to calculate the delta
+      const oldVoucher = await tx.voucher.findUnique({
+        where: { id: String(id) }
+      });
+
+      if (!oldVoucher) {
+        throw new Error('Voucher not found');
       }
+
+      const oldAmount = parseFloat(String(oldVoucher.amount || '0'));
+      const newAmount = parseFloat(String(amount || '0'));
+      const deltaAmount = newAmount - oldAmount;
+
+      // 2. Update the Voucher
+      const updatedVoucher = await tx.voucher.update({
+        where: { id: String(id) },
+        data: {
+          voucher_no,
+          date: date ? new Date(date) : undefined,
+          type,
+          party_id,
+          party_name,
+          party_type,
+          amount: newAmount,
+          payment_mode,
+          reference_no,
+          cheque_no,
+          description_: description,
+          status: status?.toLowerCase(),
+          tds_amount: tds_amount ? parseFloat(String(tds_amount)) : undefined,
+          inward_id,
+          inward_no,
+          items_json: items ? JSON.stringify(items) : undefined
+        }
+      });
+
+      // 3. If there's a positive delta, update Invoices and Ledger
+      if (deltaAmount > 0.01 && type === 'receipt' && party_type === 'customer') {
+        const invNumbers = reference_no 
+          ? String(reference_no)
+              .split(',')
+              .map((s: string) => s.trim().split('(')[0].trim()) 
+              .filter(Boolean) 
+          : [];
+        
+        if (invNumbers.length > 0) {
+          const invNumsAsInts = invNumbers.map((n: string) => {
+            const onlyDigits = n.replace(/\D/g, '');
+            return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
+          }).filter((n: number) => !isNaN(n));
+
+          const invoices = await (tx as any).legacyInvoice.findMany({
+            where: {
+              AND: [
+                {
+                  OR: [
+                    { id: { in: invNumsAsInts } },
+                    { invoice_no: { in: invNumsAsInts } },
+                    { dc_no: { in: invNumbers } }
+                  ]
+                },
+                {
+                  OR: [
+                    { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined },
+                    { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }
+                  ]
+                }
+              ]
+            }
+          });
+
+          let remainingAmount = deltaAmount;
+          for (const inv of invoices) {
+            if (remainingAmount <= 0) break;
+            
+            const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
+            const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
+            
+            const currentGrandTotal = parseFloat(cleanGrand) || 0;
+            const currentPaidAmount = parseFloat(cleanPaid) || 0;
+            
+            const balanceDue = currentGrandTotal - currentPaidAmount;
+            if (balanceDue <= 0.1) continue; 
+
+            const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
+            const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
+            
+            await (tx as any).legacyInvoice.update({
+              where: { id: inv.id },
+              data: {
+                paid_amount: String(newPaidAmount),
+                status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED'
+              }
+            });
+            remainingAmount -= paymentForThisInvoice;
+          }
+        }
+
+        // UPDATE LEDGER for the delta
+        if (party_id) {
+          const lastEntry = await (tx.ledgerEntry as any).findFirst({
+             where: {
+               party_id: String(party_id),
+               company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined
+             },
+             orderBy: { created_at: 'desc' }
+          });
+
+          const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+          const newBalance = lastBalance - deltaAmount; 
+
+          await (tx.ledgerEntry as any).create({
+            data: {
+              id: crypto.randomUUID(),
+              party_id: String(party_id),
+              party_name: party_name || 'N/A',
+              party_type: party_type || 'customer',
+              company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : null,
+              date: date ? new Date(date) : new Date(),
+              vch_type: type.toUpperCase(),
+              vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
+              type: type === 'receipt' ? 'credit' : 'debit',
+              amount: deltaAmount,
+              balance: newBalance,
+              description: `Consolidated Payment: ${deltaAmount} added to VCH ${updatedVoucher.voucher_no}`,
+              reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+            }
+          });
+        }
+      }
+
+      return updatedVoucher;
+    }, {
+      maxWait: 10000,
+      timeout: 30000
     });
-    res.json(voucher);
+
+    res.json({ ...result, items: JSON.parse((result as any).items_json || '[]') });
   } catch (error: any) {
+    console.error('❌ VOUCHER UPDATE ERROR:', error);
     res.status(500).json({ error: 'Failed to update voucher', detail: error.message });
   }
 };

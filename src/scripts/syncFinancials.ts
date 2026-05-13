@@ -32,34 +32,12 @@ async function syncFinancials() {
       if (!cId) continue;
 
       const currentBalance = customerBalances.get(cId) || 0;
-      const amount = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
       const paidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
       const cName = inv.customer_name || inv.customer?.customer_name || 'Unknown Customer';
 
-      // A. Invoice Debit
-      const newBalanceAfterInvoice = currentBalance + amount;
-      customerBalances.set(cId, newBalanceAfterInvoice);
-
-      ledgerEntriesToCreate.push({
-        id: crypto.randomUUID(),
-        party_id: String(cId),
-        party_name: cName,
-        party_type: 'customer',
-        company_id: companyId,
-        date: inv.invoice_date || new Date(),
-        vch_type: 'INVOICE',
-        vch_no: String(inv.invoice_no || inv.id),
-        type: 'debit',
-        amount: amount,
-        balance: newBalanceAfterInvoice,
-        description: `Migrated Invoice: ${inv.invoice_no || inv.id}`,
-        reference_id: String(inv.id),
-        created_at: inv.app_created_at || new Date()
-      });
-
       // B. Payment Credit
       if (paidAmount > 0) {
-        const finalBalance = newBalanceAfterInvoice - paidAmount;
+        const finalBalance = currentBalance - paidAmount;
         customerBalances.set(cId, finalBalance);
 
         const vchId = crypto.randomUUID();

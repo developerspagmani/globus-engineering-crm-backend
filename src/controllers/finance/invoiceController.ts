@@ -49,9 +49,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
 
     if (effectiveCompanyId) {
       baseWhere.AND.push({ company_id: String(effectiveCompanyId) });
-    }
-
- else if (user.role !== 'super_admin') {
+    } else if (user && user.role !== 'super_admin') {
       baseWhere.AND.push({ id: -1 }); 
     }
 
@@ -239,6 +237,10 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         status: inv.status || 'DRAFT',
         taxTotal: parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0,
         taxRate: parseFloat(String(inv.tax_rate || '0').replace(/[^\d.]/g, '')) || 0,
+        inwardId: inv.inward_id,
+        inward_id: inv.inward_id,
+        inwardNo: inv.inward_no,
+        inward_no: inv.inward_no,
         gst1: inv.gst1,
         gst2: inv.gst2,
         igst: inv.igst,
@@ -290,7 +292,9 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
   const finalTaxTotal = finalGrandTotal - finalSubTotal;
 
   // Ghost Trap: Block 0.00 invoices from background triggers
-  if (!finalGrandTotal || finalGrandTotal <= 0) {
+  // Exception: Allow 0.00 amount for "Without Process" (WOP) or "Both" (in case only WOP items are present)
+  const isWOP = String(billType || '').toLowerCase().includes('without') || String(billType || '').toLowerCase() === 'both';
+  if (!isWOP && (!finalGrandTotal || finalGrandTotal <= 0)) {
      return res.status(400).json({ 
         error: 'Cannot create an invoice with 0.00 amount. Please ensure prices and quantities are entered before saving.' 
      });
@@ -320,69 +324,78 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       if (existingDel) return res.status(400).json({ error: `Delivery Challan Number ${delNo} already exists!` });
     }
 
+    const invoiceData = {
+      invoice_no: invNo,
+      delivery_no: delNo,
+      invoice_date: date ? new Date(date) : new Date(),
+      due_date: dueDate ? new Date(dueDate) : null,
+      customer_id: customerId ? parseInt(String(customerId)) : null,
+      customer_name: customerName,
+      address,
+      total: String(subTotal || '0'),
+      grand_total: String(grandTotal || '0'),
+      items_json: JSON.stringify(items || []),
+      bill_type: billType === 'With Process' ? 'with_process' :
+        billType === 'Without Process' ? 'without_process' :
+          billType === 'Both' ? 'both' : billType,
+      inward_id: inwardId ? String(inwardId) : null,
+      company_id: String(finalCompanyId || '').toLowerCase(),
+      status: 'BILLED',
+      gstin: gstin || null,
+      state: state || null,
+      notes: notes || '',
+      tax_total: finalTaxTotal,
+      tax_rate: finalTaxRate,
+      gst1: isIntraState ? String(finalTaxTotal / 2) : null,
+      gst2: isIntraState ? String(finalTaxTotal / 2) : null,
+      igst: !isIntraState ? String(finalTaxTotal) : null,
+      gst1_per: isIntraState ? String(finalTaxRate / 2) : null,
+      gst2_per: isIntraState ? String(finalTaxRate / 2) : null,
+      igst_per: !isIntraState ? String(finalTaxRate) : null,
+      po_no: po_no || poNo,
+      po_date: (po_date || poDate) ? new Date(po_date || poDate) : null,
+      dc_no: dc_no || dcNo,
+      dc_date: (dc_date || dcDate) ? new Date(dc_date || dcDate) : null,
+    };
+
     const invoice = await prisma.$transaction(async (tx) => {
+      // If we have an inwardId, fetch it first to get its actual number for the invoice record
+      let actualInwardNo: number | null = null;
+      if (inwardId) {
+        const inward = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
+        if (inward) {
+          const matched = String(inward.inward_no || '').match(/\d+/);
+          actualInwardNo = matched ? parseInt(matched[0]) : null;
+        }
+      }
+
       const newInvoice = await (tx as any).legacyInvoice.create({
         data: {
-          invoice_no: invNo,
-          delivery_no: delNo,
-          invoice_date: date ? new Date(date) : new Date(),
-          due_date: dueDate ? new Date(dueDate) : null,
-          customer: customerId ? { connect: { id: parseInt(String(customerId)) } } : undefined,
-          customer_name: customerName,
-          address,
-          total: String(subTotal || '0'),
-          grand_total: String(grandTotal || '0'),
-          items_json: JSON.stringify(items || []),
-          bill_type: billType === 'With Process' ? 'with_process' :
-            billType === 'Without Process' ? 'without_process' :
-              billType === 'Both' ? 'both' : 'with_process',
-          inward_no: invNo,
-          po_no: String(po_no || poNo || '').trim() || null,
-          po_date: (po_date || poDate) ? new Date(po_date || poDate) : null,
-          dc_no: String(dc_no || dcNo || '').trim() || null,
-          dc_date: (dc_date || dcDate) ? new Date(dc_date || dcDate) : null,
-          inward_id: inwardId ? String(inwardId) : null,
-          company_id: String(finalCompanyId || '').toLowerCase(),
-          status: 'BILLED',
-          gstin: gstin || null,
-          state: state || null,
-          notes: notes || '',
-          tax_total: finalTaxTotal,
-          tax_rate: finalTaxRate,
-          gst1: isIntraState ? String(finalTaxTotal / 2) : null,
-          gst2: isIntraState ? String(finalTaxTotal / 2) : null,
-          igst: !isIntraState ? String(finalTaxTotal) : null,
-          gst1_per: isIntraState ? String(finalTaxRate / 2) : null,
-          gst2_per: isIntraState ? String(finalTaxRate / 2) : null,
-          igst_per: !isIntraState ? String(finalTaxRate) : null,
+          ...invoiceData,
+          inward_no: actualInwardNo || invNo // Use actual inward no if found, fallback to invoice no for legacy compatibility
         }
       });
 
-
-
+      // Update Inward status if linked
       if (inwardId) {
-        // 1. Fetch current inward to see total original qty
         const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
         if (entry) {
           const originalItems = JSON.parse(entry.items_json || '[]');
           const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
 
-          // 2. Fetch all invoices for this inward (including the one just created or being created)
-          // Since we are in a transaction, we can find existing ones and add current
-          const otherInvoices = await (tx as any).legacyInvoice.findMany({
+          const allInvoicesForInward = await (tx as any).legacyInvoice.findMany({
             where: { inward_id: String(inwardId) }
           });
           
           let totalBilled = 0;
-          [...otherInvoices, newInvoice].forEach((inv: any) => {
+          allInvoicesForInward.forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
             invItems.forEach((ii: any) => {
               totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
             });
           });
 
-          // 3. Update status based on actual math
-          const isFinished = (totalOriginal - totalBilled) <= 0.5; // Use 0.5 for rounding safety
+          const isFinished = (totalOriginal - totalBilled) <= 0.5;
           await tx.inwardEntry.update({
             where: { id: String(inwardId) },
             data: { status: isFinished ? 'completed' : 'pending' }
@@ -390,41 +403,10 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         }
       }
 
-      // 3. Update Ledger with running balance
-      const lastEntry = await (tx.ledgerEntry as any).findFirst({
-        where: {
-          party_id: String(customerId),
-          company_id: finalCompanyId ? String(finalCompanyId) : undefined
-        },
-        orderBy: { created_at: 'desc' }
-      });
-
-      const lastBalance = (lastEntry as any)?.balance ?? 0;
-      // Clean numeric strings of characters like ₹, commas, etc.
-      const rawGrandTotal = String(grandTotal || '0').replace(/[^\d.]/g, '');
-      const amountAsFloat = parseFloat(rawGrandTotal);
-      const newBalance = lastBalance + amountAsFloat;
-
-      const totalQty = items?.reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0) || 0;
-      await (tx.ledgerEntry as any).create({
-        data: {
-          id: crypto.randomUUID(),
-          party_id: String(customerId),
-          party_name: customerName,
-          party_type: 'customer',
-          company_id: finalCompanyId ? String(finalCompanyId) : null,
-          date: date ? new Date(date) : new Date(),
-          vch_type: 'INVOICE',
-          vch_no: String(newInvoice.invoice_no || newInvoice.id),
-          type: 'debit',
-          amount: amountAsFloat,
-          balance: newBalance,
-          description: `Invoice: ${newInvoice.invoice_no || newInvoice.id} (Qty: ${totalQty})`,
-          reference_id: String(newInvoice.id)
-        }
-      });
-
       return newInvoice;
+    }, {
+      maxWait: 15000,
+      timeout: 45000
     });
 
     // Logging Audit

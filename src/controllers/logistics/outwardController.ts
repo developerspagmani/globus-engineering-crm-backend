@@ -142,42 +142,8 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // 2. AUTOMATIC LEDGER ENTRY FOR VENDOR JOB WORK
-    if (finalPartyType.toLowerCase() === 'vendor' && finalVendorId) {
-       const jobValue = parseFloat(String(req.body.amount || '0'));
-       if (jobValue > 0) {
-          // Find last balance for the vendor
-          const lastLedger = await prisma.ledgerEntry.findFirst({
-             where: { party_id: String(finalVendorId), company_id: finalCompanyId },
-             orderBy: { created_at: 'desc' }
-          });
-          const lastBalance = lastLedger ? parseFloat(String((lastLedger as any).balance || '0')) : 0;
-          
-          // Vendor Ledger (Liability): Balance = Old + Credit - Debit
-          // Sending goods to vendor is a DEBIT (reduces our liability or records their possession)
-          const newBalance = lastBalance - jobValue;
-
-          const totalQty = JSON.parse(entry.items_json || '[]').reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
-
-          await (prisma.ledgerEntry as any).create({
-             data: {
-                id: crypto.randomUUID(),
-                party_id: String(finalVendorId),
-                party_name: String(finalVendorName || 'N/A'),
-                party_type: 'vendor',
-                company_id: finalCompanyId,
-                date: new Date(),
-                vch_type: 'OUTWARD',
-                vch_no: String(finalOutwardNo || ''),
-                type: 'debit',
-                amount: jobValue,
-                balance: newBalance,
-                description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
-                reference_id: String(entry.id)
-             }
-          });
-       }
-    }
+    // 2. AUTOMATIC LEDGER ENTRY REMOVED as per request.
+    // (Previously, this block created a 'debit' entry for Vendor Job Work)
 
     res.status(201).json({
       ...entry,
@@ -233,55 +199,8 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
       }
     });
 
-    // 2. AUTOMATIC LEDGER SYNC FOR UPDATE
-    const jobValue = parseFloat(String(req.body.amount || '0'));
-    const user = req.user;
-    const finalCompanyId = user?.company_id || entry.company_id;
-
-    if ((finalPartyType || 'customer').toLowerCase() === 'vendor' && finalVendorId && jobValue > 0) {
-       const existingLedger = await (prisma.ledgerEntry as any).findFirst({
-          where: { reference_id: String(entry.id) }
-       });
-
-       const totalQty = JSON.parse(entry.items_json || '[]').reduce((acc: number, cur: any) => acc + (parseFloat(cur.quantity) || 0), 0);
-
-       if (existingLedger) {
-          await (prisma.ledgerEntry as any).update({
-             where: { id: existingLedger.id },
-             data: {
-                amount: jobValue,
-                vch_no: finalOutwardNo || String((entry as any).outward_no || ''),
-                description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`
-             }
-          });
-       } else {
-          // Create new ledger entry if missing
-          const lastLedger = await (prisma.ledgerEntry as any).findFirst({
-             where: { party_id: String(finalVendorId), company_id: finalCompanyId },
-             orderBy: { created_at: 'desc' }
-          });
-          const lastBalance = lastLedger ? (lastLedger.balance || 0) : 0;
-          const newBalance = lastBalance - jobValue;
-
-          await (prisma.ledgerEntry as any).create({
-             data: {
-                id: crypto.randomUUID(),
-                party_id: String(finalVendorId),
-                party_name: String(finalVendorName || 'N/A'),
-                party_type: 'vendor',
-                company_id: finalCompanyId,
-                date: new Date(),
-                vch_type: 'OUTWARD',
-                vch_no: String(finalOutwardNo || (entry as any).outward_no || ''),
-                type: 'debit',
-                amount: jobValue,
-                balance: newBalance,
-                description: `Job Work Dispatch: ${finalProcessName || 'Processing'} (Qty: ${totalQty})`,
-                reference_id: String(entry.id)
-             }
-          });
-       }
-    }
+    // 2. AUTOMATIC LEDGER SYNC REMOVED as per request.
+    // (Previously, this block synced the 'debit' entry for Vendor Job Work)
 
     res.json({
       ...entry,
