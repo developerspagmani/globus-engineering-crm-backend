@@ -194,8 +194,13 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       };
     });
 
+    const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
+    const finalEntries = isInvoiceScreen 
+      ? parsedEntries.filter((e: any) => e.items.some((it: any) => it.billingBalance > 0))
+      : parsedEntries;
+
     res.json({
-      items: parsedEntries,
+      items: finalEntries,
       pagination: {
         total: totalCount,
         page,
@@ -462,7 +467,10 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         };
       });
 
-      const hasBalance = balanceItems.some((item: any) => item.remainingQty > 0);
+      const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
+      const hasBalance = isInvoiceScreen
+        ? balanceItems.some((item: any) => item.billingBalance > 0)
+        : balanceItems.some((item: any) => item.remainingQty > 0);
       // console.log(`[DIAGNOSTIC] Inward #${entry.inward_no}: hasBalance=${hasBalance}, Items=${balanceItems.length}`);
 
       return {
