@@ -180,7 +180,8 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             }
           });
 
-          let remainingAmount = finalAmount;
+          const totalSettlementAmount = finalAmount + (parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0) + (parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0);
+          let remainingAmount = totalSettlementAmount;
           for (const inv of invoices) {
             if (remainingAmount <= 0) break;
             
@@ -254,7 +255,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             amount: finalAmount,
             balance: newBalance,
             description: `${type.charAt(0).toUpperCase() + type.slice(1)}: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `Ref: ${reference_no}` : ''}`,
-            reference_id: voucher.voucher_no || voucher.id
+            reference_id: voucher.id
           }
         });
 
@@ -421,7 +422,8 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
               }
             });
 
-            let remainingAmount = deltaAmount;
+            const totalSettlementDelta = deltaAmount + (parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0) + (parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0);
+            let remainingAmount = totalSettlementDelta;
             for (const inv of invoices) {
               if (remainingAmount <= 0) break;
               
@@ -456,8 +458,11 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
         await (tx.ledgerEntry as any).deleteMany({
           where: {
             OR: [
-              { reference_id: String(updatedVoucher.voucher_no) },
+              { reference_id: String(oldVoucher.id) },
+              { reference_id: String(oldVoucher.voucher_no) },
+              { vch_no: String(oldVoucher.voucher_no) },
               { reference_id: String(updatedVoucher.id) },
+              { reference_id: String(updatedVoucher.voucher_no) },
               { vch_no: String(updatedVoucher.voucher_no) }
             ]
           }
@@ -499,7 +504,7 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
             amount: newAmount,
             balance: newBalance,
             description: `${type.charAt(0).toUpperCase() + type.slice(1)}: ${payment_mode.toUpperCase()} ${cheque_no ? `(CHQ: ${cheque_no})` : ''} ${reference_no ? `Ref: ${reference_no}` : ''}`,
-            reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+            reference_id: updatedVoucher.id
           }
         });
 
@@ -559,7 +564,7 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
                   amount: newAmount,
                   balance: custNewBalance,
                   description: `Processing Charge (Job Work Vendor: ${party_name || 'Vendor'}) for Inward: ${inwardEntry.inward_no || 'N/A'}`,
-                  reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+                  reference_id: updatedVoucher.id
                 }
               });
             }
@@ -583,9 +588,29 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
 export const deleteVoucher = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
-    await prisma.voucher.delete({ where: { id: String(id) } });
-    res.json({ message: 'Voucher deleted successfully' });
+    const voucher = await prisma.voucher.findUnique({ where: { id: String(id) } });
+    
+    await prisma.$transaction(async (tx) => {
+      // 1. Delete associated Ledger Entries
+      if (voucher) {
+        await (tx.ledgerEntry as any).deleteMany({
+          where: {
+            OR: [
+              { reference_id: String(voucher.id) },
+              { reference_id: String(voucher.voucher_no) },
+              { vch_no: String(voucher.voucher_no) }
+            ]
+          }
+        });
+      }
+
+      // 2. Delete the Voucher
+      await tx.voucher.delete({ where: { id: String(id) } });
+    });
+
+    res.json({ message: 'Voucher and associated ledger entries deleted successfully' });
   } catch (error: any) {
+    console.error('❌ VOUCHER DELETE ERROR:', error);
     res.status(500).json({ error: 'Failed to delete voucher', detail: error.message });
   }
 };
