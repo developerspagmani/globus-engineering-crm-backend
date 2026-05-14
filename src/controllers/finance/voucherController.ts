@@ -60,7 +60,11 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
     if (fromDate || toDate) {
       const dateFilter: any = {};
       if (fromDate) dateFilter.gte = new Date(fromDate);
-      if (toDate)   dateFilter.lte = new Date(toDate);
+      if (toDate) {
+        const endOfDay = new Date(toDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        dateFilter.lte = endOfDay;
+      }
       where.AND.push({ date: dateFilter });
     }
 
@@ -77,7 +81,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         orderBy: { date: 'desc' }
       }),
       prisma.voucher.count({ where }),
-      prisma.voucher.findMany({ where, select: { amount: true, tds_amount: true } })
+      prisma.voucher.findMany({ where, select: { amount: true, tds_amount: true, others_amount: true } })
     ]);
 
     const totalCollected = amountRows.reduce(
@@ -86,6 +90,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
     );
 
     const totalTDS = amountRows.reduce((sum: number, v: any) => sum + (Number(v.tds_amount) || 0), 0);
+    const totalOthers = amountRows.reduce((sum: number, v: any) => sum + (Number(v.others_amount) || 0), 0);
 
     res.json({
       items: vouchers.map((v: any) => ({ ...v, items: JSON.parse(v.items_json || '[]') })),
@@ -95,7 +100,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         limit,
         totalPages: Math.ceil(totalCount / limit)
       },
-      aggregates: { totalCollected, totalTDS }
+      aggregates: { totalCollected, totalTDS, totalOthers }
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch vouchers', detail: error.message });
@@ -103,7 +108,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 };
 
 export const createVoucher = async (req: AuthRequest, res: Response) => {
-  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status, tds_amount, inward_id, inward_no, items } = req.body;
+  const { id, voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, company_id, companyId, status, tds_amount, tdsAmount, others_amount, othersAmount, inward_id, inward_no, items } = req.body;
   const user = req.user;
   const rawCompanyId = company_id || companyId || user?.company_id || (user as any)?.companyId;
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
@@ -130,7 +135,8 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           description_: description || '',
           company_id: finalCompanyId ? String(finalCompanyId) : null,
           status: status || 'posted',
-          tds_amount: parseFloat(String(tds_amount || '0')) || 0,
+          tds_amount: parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0,
+          others_amount: parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0,
           inward_id,
           inward_no,
           items_json: JSON.stringify(items || [])
@@ -336,7 +342,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
 
 export const updateVoucher = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status, tds_amount, inward_id, inward_no, items } = req.body;
+  const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status, tds_amount, tdsAmount, others_amount, othersAmount, inward_id, inward_no, items } = req.body;
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -369,7 +375,8 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
           cheque_no,
           description_: description,
           status: status?.toLowerCase(),
-          tds_amount: tds_amount ? parseFloat(String(tds_amount)) : undefined,
+          tds_amount: (tds_amount !== undefined || tdsAmount !== undefined) ? parseFloat(String(tds_amount ?? tdsAmount)) : undefined,
+          others_amount: (others_amount !== undefined || othersAmount !== undefined) ? parseFloat(String(others_amount ?? othersAmount)) : undefined,
           inward_id,
           inward_no,
           items_json: items ? JSON.stringify(items) : undefined
@@ -448,7 +455,11 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
         // Delete any existing ledger entries for this voucher reference first
         await (tx.ledgerEntry as any).deleteMany({
           where: {
-            reference_id: updatedVoucher.voucher_no || updatedVoucher.id
+            OR: [
+              { reference_id: String(updatedVoucher.voucher_no) },
+              { reference_id: String(updatedVoucher.id) },
+              { vch_no: String(updatedVoucher.voucher_no) }
+            ]
           }
         });
 

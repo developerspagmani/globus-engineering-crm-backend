@@ -393,6 +393,7 @@ model Voucher {
   created_at   DateTime? @default(now()) @db.Timestamp(0)
   cheque_no    String?   @db.VarChar(50)
   tds_amount   Float?    @default(0)
+  others_amount Float?   @default(0)
   inward_id    String?   @db.VarChar(50)
   inward_no    String?   @db.VarChar(50)
   items_json   String?   @db.Text
