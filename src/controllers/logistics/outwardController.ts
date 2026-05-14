@@ -117,29 +117,88 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   const finalInwardNo = inward_no || inwardNo;
 
   try {
-    const entry = await (prisma.outwardEntry as any).create({
-      data: {
-        id: crypto.randomUUID(),
-        outward_no: finalOutwardNo,
-        party_type: finalPartyType,
-        customer_id: finalCustomerId,
-        customer_name: finalCustomerName,
-        vendor_id: finalVendorId,
-        vendor_name: finalVendorName,
-        process_name: finalProcessName,
-        invoice_reference: String(invoice_reference || invoiceReference || ''),
-        challan_no: String(challan_no || challanNo || ''),
-        vehicle_no: String(vehicle_no || vehicleNo || ''),
-        driver_name: String(driver_name || driverName || ''),
-        notes: String(notes || ''),
-        company_id: finalCompanyId,
-        inward_id: String(finalInwardId || ''),
-        inward_no: String(finalInwardNo || ''),
-        status: status || 'completed',
-        amount: parseFloat(String(req.body.amount || '0')),
-        items_json: JSON.stringify(items || []),
-        date: new Date()
+    const entry = await prisma.$transaction(async (tx) => {
+      const newEntry = await (tx.outwardEntry as any).create({
+        data: {
+          id: crypto.randomUUID(),
+          outward_no: finalOutwardNo,
+          party_type: finalPartyType,
+          customer_id: finalCustomerId,
+          customer_name: finalCustomerName,
+          vendor_id: finalVendorId,
+          vendor_name: finalVendorName,
+          process_name: finalProcessName,
+          invoice_reference: String(invoice_reference || invoiceReference || ''),
+          challan_no: String(challan_no || challanNo || ''),
+          vehicle_no: String(vehicle_no || vehicleNo || ''),
+          driver_name: String(driver_name || driverName || ''),
+          notes: String(notes || ''),
+          company_id: finalCompanyId,
+          inward_id: String(finalInwardId || ''),
+          inward_no: String(finalInwardNo || ''),
+          status: status || 'completed',
+          amount: parseFloat(String(req.body.amount || '0')),
+          items_json: JSON.stringify(items || []),
+          date: new Date()
+        }
+      });
+
+      // DUAL-COMPLETION STATUS UPDATE
+      if (finalInwardId) {
+        const inwardIdStr = String(finalInwardId);
+        const inward = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
+        if (inward) {
+          const originalItems = JSON.parse(inward.items_json || '[]');
+          const allInvoices = await (tx as any).legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
+          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+          
+          // Optimization: Pre-aggregate billed and dispatched totals to avoid nested loop overhead
+          const billedMap = new Map<string, number>();
+          const dispatchedMap = new Map<string, number>();
+
+          allInvoices.forEach((inv: any) => {
+            const invItems = JSON.parse(inv.items_json || '[]');
+            invItems.forEach((ii: any) => {
+              const iden = (ii.description || ii.item_name || '').toLowerCase();
+              const qty = (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+              billedMap.set(iden, (billedMap.get(iden) || 0) + qty);
+            });
+          });
+
+          allOutwards.forEach((ow: any) => {
+            const owItems = JSON.parse(ow.items_json || '[]');
+            owItems.forEach((oi: any) => {
+              const iden = (oi.description || oi.item_name || '').toLowerCase();
+              if (ow.party_type !== 'vendor') {
+                const qty = parseFloat(oi.quantity || oi.qty || '0');
+                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + qty);
+              }
+            });
+          });
+
+          let allBilled = true;
+          let allDispatched = true;
+
+          originalItems.forEach((item: any) => {
+             const iden = (item.description || item.item_name || '').toLowerCase();
+             const itemBilled = billedMap.get(iden) || 0;
+             const itemDispatched = dispatchedMap.get(iden) || 0;
+
+             const original = parseFloat(item.quantity || item.qty || '0');
+             if (itemBilled < original - 0.5) allBilled = false;
+             if (itemDispatched < original - 0.5) allDispatched = false;
+          });
+
+          await tx.inwardEntry.update({
+            where: { id: inwardIdStr },
+            data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
+          });
+        }
       }
+
+      return newEntry;
+    }, {
+      timeout: 20000
     });
 
     // 2. AUTOMATIC LEDGER ENTRY REMOVED as per request.
@@ -178,25 +237,81 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
   const finalProcessName = process_name || processName;
 
   try {
-    const entry = await (prisma.outwardEntry as any).update({
-      where: { id: String(id) },
-      data: {
-        outward_no,
-        party_type,
-        customer_id,
-        customer_name,
-        vendor_id,
-        vendor_name,
-        process_name,
-        invoice_reference,
-        challan_no,
-        vehicle_no,
-        driver_name,
-        notes,
-        status,
-        items_json: items ? JSON.stringify(items) : undefined,
-        amount: parseFloat(String(req.body.amount || 0)),
+    const entry = await prisma.$transaction(async (tx) => {
+      const updatedEntry = await (tx.outwardEntry as any).update({
+        where: { id: String(id) },
+        data: {
+          outward_no,
+          party_type,
+          customer_id,
+          customer_name,
+          vendor_id,
+          vendor_name,
+          process_name,
+          invoice_reference,
+          challan_no,
+          vehicle_no,
+          driver_name,
+          notes,
+          status,
+          items_json: items ? JSON.stringify(items) : undefined,
+          amount: parseFloat(String(req.body.amount || 0)),
+        }
+      });
+
+      // DUAL-COMPLETION STATUS UPDATE
+      const effInwardId = updatedEntry.inward_id;
+      if (effInwardId) {
+        const inwardIdStr = String(effInwardId);
+        const inward = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
+        if (inward) {
+          const originalItems = JSON.parse(inward.items_json || '[]');
+          const allInvoices = await (tx as any).legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
+          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+          
+          const billedMap = new Map<string, number>();
+          const dispatchedMap = new Map<string, number>();
+
+          allInvoices.forEach((inv: any) => {
+            const invItems = JSON.parse(inv.items_json || '[]');
+            invItems.forEach((ii: any) => {
+              const iden = (ii.description || ii.item_name || '').toLowerCase();
+              billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
+            });
+          });
+
+          allOutwards.forEach((ow: any) => {
+            const owItems = JSON.parse(ow.items_json || '[]');
+            owItems.forEach((oi: any) => {
+              const iden = (oi.description || oi.item_name || '').toLowerCase();
+              if (ow.party_type !== 'vendor') {
+                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+              }
+            });
+          });
+
+          let allBilled = true;
+          let allDispatched = true;
+
+          originalItems.forEach((item: any) => {
+             const iden = (item.description || item.item_name || '').toLowerCase();
+             const itemBilled = billedMap.get(iden) || 0;
+             const itemDispatched = dispatchedMap.get(iden) || 0;
+             const original = parseFloat(item.quantity || item.qty || '0');
+             if (itemBilled < original - 0.5) allBilled = false;
+             if (itemDispatched < original - 0.5) allDispatched = false;
+          });
+
+          await tx.inwardEntry.update({
+            where: { id: inwardIdStr },
+            data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
+          });
+        }
       }
+
+      return updatedEntry;
+    }, {
+      timeout: 20000
     });
 
     // 2. AUTOMATIC LEDGER SYNC REMOVED as per request.

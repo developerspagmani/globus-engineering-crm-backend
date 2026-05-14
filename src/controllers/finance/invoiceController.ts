@@ -382,24 +382,47 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
         if (entry) {
           const originalItems = JSON.parse(entry.items_json || '[]');
-          const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
-
-          const allInvoicesForInward = await (tx as any).legacyInvoice.findMany({
-            where: { inward_id: String(inwardId) }
-          });
+          const inwardIdStr = String(inwardId);
           
-          let totalBilled = 0;
-          allInvoicesForInward.forEach((inv: any) => {
+          const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
+          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+          
+          const billedMap = new Map<string, number>();
+          const dispatchedMap = new Map<string, number>();
+
+          allInvoices.forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
             invItems.forEach((ii: any) => {
-              totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+              const iden = (ii.description || ii.item_name || '').toLowerCase();
+              billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
             });
           });
 
-          const isFinished = (totalOriginal - totalBilled) <= 0.5;
+          allOutwards.forEach((ow: any) => {
+            const owItems = JSON.parse(ow.items_json || '[]');
+            owItems.forEach((oi: any) => {
+              const iden = (oi.description || oi.item_name || '').toLowerCase();
+              if (ow.party_type !== 'vendor') {
+                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+              }
+            });
+          });
+
+          let allBilled = true;
+          let allDispatched = true;
+
+          originalItems.forEach((item: any) => {
+             const iden = (item.description || item.item_name || '').toLowerCase();
+             const itemBilled = billedMap.get(iden) || 0;
+             const itemDispatched = dispatchedMap.get(iden) || 0;
+             const original = parseFloat(item.quantity || item.qty || '0');
+             if (itemBilled < original - 0.5) allBilled = false;
+             if (itemDispatched < original - 0.5) allDispatched = false;
+          });
+
           await tx.inwardEntry.update({
-            where: { id: String(inwardId) },
-            data: { status: isFinished ? 'completed' : 'pending' }
+            where: { id: inwardIdStr },
+            data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
           });
         }
       }
@@ -549,31 +572,54 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
 
       // Smart Status Update for Inward if linked
       const effectiveInwardId = inwardId !== undefined ? inwardId : updatedInvoice.inward_id;
-      if (effectiveInwardId) {
-        const entry = await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } });
-        if (entry) {
-          const originalItems = JSON.parse(entry.items_json || '[]');
-          const totalOriginal = originalItems.reduce((acc: number, it: any) => acc + (parseFloat(it.quantity || it.qty || '0')), 0);
+          // DUAL-COMPLETION STATUS UPDATE
+          const inwardIdStr = String(effectiveInwardId);
+          const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
+          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+          
+          const billedMap = new Map<string, number>();
+          const dispatchedMap = new Map<string, number>();
 
-          const allInvoices = await (tx as any).legacyInvoice.findMany({
-            where: { inward_id: String(effectiveInwardId) }
-          });
-
-          let totalBilled = 0;
           allInvoices.forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
             invItems.forEach((ii: any) => {
-              totalBilled += (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+              const iden = (ii.description || ii.item_name || '').toLowerCase();
+              billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
             });
           });
 
-          const isFinished = (totalOriginal - totalBilled) <= 0.5;
-          await tx.inwardEntry.update({
-            where: { id: String(effectiveInwardId) },
-            data: { status: isFinished ? 'completed' : 'pending' }
+          allOutwards.forEach((ow: any) => {
+            const owItems = JSON.parse(ow.items_json || '[]');
+            owItems.forEach((oi: any) => {
+              const iden = (oi.description || oi.item_name || '').toLowerCase();
+              if (ow.party_type !== 'vendor') {
+                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+              }
+            });
           });
-        }
-      }
+
+          let allBilled = true;
+          let allDispatched = true;
+
+          // Note: we need originalItems here. In updateInvoice, it might be missing if not fetched.
+          const entry = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
+          if (entry) {
+            const originalItems = JSON.parse(entry.items_json || '[]');
+
+            originalItems.forEach((item: any) => {
+               const iden = (item.description || item.item_name || '').toLowerCase();
+               const itemBilled = billedMap.get(iden) || 0;
+               const itemDispatched = dispatchedMap.get(iden) || 0;
+               const original = parseFloat(item.quantity || item.qty || '0');
+               if (itemBilled < original - 0.5) allBilled = false;
+               if (itemDispatched < original - 0.5) allDispatched = false;
+            });
+
+            await tx.inwardEntry.update({
+              where: { id: inwardIdStr },
+              data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
+            });
+          }
 
       // --- UPDATE LEDGER ENTRIES FOR INVOICE ---
       await (tx.ledgerEntry as any).deleteMany({

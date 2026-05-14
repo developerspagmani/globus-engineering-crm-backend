@@ -2,25 +2,16 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
- 
+
 export const getInwardEntries = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
   const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId);
-  const isOutward = req.query.purpose === 'outward' || req.query.type === 'outward' || String(req.headers.referer || '').includes('outward');
- 
-  try {
-    const logPath = path.join(__dirname, '../../scratch/api_logs.txt');
-    const logData = `[${new Date().toISOString()}] GET_INWARDS | URL: ${req.originalUrl} | Query: ${JSON.stringify(req.query)} | Referer: ${req.headers.referer}\n`;
-    fs.appendFileSync(logPath, logData);
-  } catch (e) {}
- 
+
   // Pagination & Filter Params
   const page = parseInt(req.query.page as string) || 1;
   const requestedLimit = parseInt(req.query.limit as string);
- 
+  
   // Selection Mode Expansion: If frontend requests exactly 100 (standard for selection dropdowns/modals),
   // we expand to 5000 to ensure the user sees all 200+ pending records.
   let limit = requestedLimit || 10;
@@ -29,12 +20,12 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
   }
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
- 
+
   try {
     const where: any = {
       AND: []
     };
- 
+
     if (companyId) {
       where.AND.push({
         OR: [
@@ -44,7 +35,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         ]
       });
     }
- 
+
     if (search) {
       where.AND.push({
         OR: [
@@ -57,12 +48,12 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         ]
       });
     }
- 
+
     const status = req.query.status as string;
     if (status && status !== 'all') {
       where.AND.push({ status: status });
     }
- 
+
     const [entries, totalCount, completedCount, pendingCount, partiesRaw] = await Promise.all([
       prisma.inwardEntry.findMany({
         where,
@@ -82,7 +73,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         distinct: ['customer_name']
       })
     ]);
- 
+
     // Fetch related records only for the paginated entries to calculate balances
     const inwardIds = entries.map(e => e.id);
     const invoices = await (prisma as any).legacyInvoice.findMany({
@@ -91,7 +82,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     const outwards = await prisma.outwardEntry.findMany({
       where: { inward_id: { in: inwardIds } }
     });
- 
+
     // Pre-group invoices and outwards
     const invoiceGroups = new Map<string, any[]>();
     invoices.forEach((inv: any) => {
@@ -99,69 +90,55 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       if (!invoiceGroups.has(gid)) invoiceGroups.set(gid, []);
       invoiceGroups.get(gid)!.push(inv);
     });
- 
+
     const outwardGroups = new Map<string, any[]>();
     outwards.forEach((ow: any) => {
       const gid = String(ow.inward_id);
       if (!outwardGroups.has(gid)) outwardGroups.set(gid, []);
       outwardGroups.get(gid)!.push(ow);
     });
- 
+
     const parsedEntries = entries.map((e: any) => {
       const items = JSON.parse(e.items_json || '[]');
       const invoicedForThisEntry = invoiceGroups.get(String(e.id)) || [];
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
- 
+
       const balanceItems = items.map((item: any) => {
         let totalInvoiced = 0;
-        let totalCompletedQty = 0;
-        let totalDeliveredToCustomerQty = 0;
+        let totalDispatched = 0;
         let totalSentToVendor = 0;
         let totalReturnedFromVendor = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
- 
+
         // 1. Add Invoiced quantities (Billed to customer)
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            const qty = parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0');
-            totalInvoiced += qty;
- 
-            const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-            const cleanPaid  = String(inv.paid_amount || '0').replace(/[^\d.]/g, '');
-            const grand = parseFloat(cleanGrand) || 0;
-            const paid = parseFloat(cleanPaid) || 0;
- 
-            if (inv.status === 'PAID' || inv.status === 'COMPLETED' || paid >= (grand - 0.5)) {
-              totalCompletedQty += qty;
-            }
+            totalInvoiced += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
           }
         });
- 
+
         // 2. Add Outward quantities (Sent to Vendor OR Customer)
         outwardsForThisEntry.forEach((ow: any) => {
           const owItems = JSON.parse(ow.items_json || '[]');
           const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            const qty = parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             if (ow.party_type === 'vendor') {
-              totalSentToVendor += qty;
+              totalSentToVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             } else {
               // Standard Customer Delivery
-              totalInvoiced += qty;
-              totalDeliveredToCustomerQty += qty;
+              totalDispatched += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             }
           }
         });
- 
+
         // 3. Find Inwards FROM Vendors that link to Outwards to Vendors linked to THIS Inward
-        // This calculates the "Returns" from the job work loop
-        const relatedVendorInwards = entries.filter((ei: any) =>
-          ei.party_type === 'vendor' &&
+        const relatedVendorInwards = entries.filter((ei: any) => 
+          ei.party_type === 'vendor' && 
           outwardsForThisEntry.some(ow => ow.id === ei.outward_id)
         );
- 
+
         relatedVendorInwards.forEach((vi: any) => {
           const viItems = JSON.parse(vi.items_json || '[]');
           const matchingItem = viItems.find((vii: any) => (vii.description || vii.item_name || '').toLowerCase() === itemIdentifier);
@@ -169,29 +146,32 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
             totalReturnedFromVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
           }
         });
- 
+
         const originalQty = parseFloat(item.quantity || item.qty || '0');
         const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
-        const inHouseQty = Math.max(0, originalQty - totalInvoiced - currentlyAtVendor);
-        const pendingDeliveryQty = Math.max(0, totalCompletedQty - totalDeliveredToCustomerQty);
-        const effectiveRem = isOutward ? pendingDeliveryQty : inHouseQty;
- 
+        
+        // DUAL BALANCE LOGIC:
+        // Billing balance = How much is left to be invoiced
+        // Dispatch balance = How much is left in house to be shipped to customer
+        const billingBalance = Math.max(0, originalQty - totalInvoiced);
+        const vendorWorkBalance = Math.max(0, billingBalance - currentlyAtVendor);
+        const dispatchBalance = Math.max(0, originalQty - totalDispatched - currentlyAtVendor);
+
         return {
           ...item,
           originalQty,
           invoicedQty: totalInvoiced,
-          completedQty: totalCompletedQty,
-          deliveredQty: totalDeliveredToCustomerQty,
-          pendingDeliveryQty,
+          dispatchedQty: totalDispatched,
           atVendorQty: currentlyAtVendor,
           returnedQty: totalReturnedFromVendor,
-          remainingQty: effectiveRem, // What is available to be billed/sent
-          inHouseQty: effectiveRem,
-          quantity: effectiveRem,
-          qty: effectiveRem
+          billingBalance: billingBalance,
+          vendorWorkBalance: vendorWorkBalance,
+          dispatchBalance: dispatchBalance,
+          remainingQty: Math.max(billingBalance, dispatchBalance), // Used for general pending status
+          inHouseQty: dispatchBalance
         };
       });
- 
+
       return {
         ...e,
         customerName: e.customer_name,
@@ -207,17 +187,15 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         dueDate: e.due_date,
         createdAt: e.created_at,
         items: balanceItems,
-        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + (cur.remainingQty || 0), 0),
+        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + cur.remainingQty, 0),
         outwardId: e.outward_id,
         outwardNo: e.outward_no,
         partyType: e.party_type
       };
     });
- 
-    const finalEntries = isOutward ? parsedEntries.filter((e: any) => e.totalRemaining > 0) : parsedEntries;
- 
+
     res.json({
-      items: finalEntries,
+      items: parsedEntries,
       pagination: {
         total: totalCount,
         page,
@@ -234,7 +212,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch inward entries with balance', detail: error.message });
   }
 };
- 
+
 export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const {
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
@@ -243,34 +221,48 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
- 
+
   try {
-    const entry = await prisma.inwardEntry.create({
-      data: {
-        id: crypto.randomUUID(),
-        inward_no,
-        customer_id: String(customer_id || ''),
-        customer_name,
-        address,
-        vendor_id: String(vendor_id || ''),
-        vendor_name: String(vendor_name || ''),
-        po_reference: String(po_reference || ''),
-        po_date: po_date ? new Date(po_date) : null,
-        challan_no: String(challan_no || ''),
-        dc_no: String(dc_no || ''),
-        dc_date: dc_date ? new Date(dc_date) : null,
-        vehicle_no: String(vehicle_no || ''),
-        company_id: String(finalCompanyId || ''),
-        status: status || 'pending',
-        items_json: JSON.stringify(items || []),
-        due_date: due_date ? new Date(due_date) : null,
-        date: new Date(),
-        party_type: party_type || partyType || 'customer',
-        outward_id: String(outward_id || outwardId || ''),
-        outward_no: String(outward_no || outwardNo || '')
+    let attempts = 0;
+    let entry;
+    while (attempts < 3) {
+      try {
+        entry = await prisma.inwardEntry.create({
+          data: {
+            id: crypto.randomUUID(),
+            inward_no,
+            customer_id: String(customer_id || ''),
+            customer_name,
+            address,
+            vendor_id: String(vendor_id || ''),
+            vendor_name: String(vendor_name || ''),
+            po_reference: String(po_reference || ''),
+            po_date: po_date ? new Date(po_date) : null,
+            challan_no: String(challan_no || ''),
+            dc_no: String(dc_no || ''),
+            dc_date: dc_date ? new Date(dc_date) : null,
+            vehicle_no: String(vehicle_no || ''),
+            company_id: String(finalCompanyId || ''),
+            status: status || 'pending',
+            items_json: JSON.stringify(items || []),
+            due_date: due_date ? new Date(due_date) : null,
+            date: new Date(),
+            party_type: party_type || partyType || 'customer',
+            outward_id: String(outward_id || outwardId || ''),
+            outward_no: String(outward_no || outwardNo || '')
+          }
+        });
+        break;
+      } catch (error: any) {
+        attempts++;
+        if (attempts < 3 && (error.message.includes('reach database') || error.code?.startsWith('P1'))) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          continue;
+        }
+        throw error;
       }
-    });
- 
+    }
+
     res.status(201).json({
       ...entry,
       items: JSON.parse((entry as any).items_json || '[]')
@@ -279,7 +271,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to create inward entry', detail: error.message });
   }
 };
- 
+
 export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
@@ -287,7 +279,7 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
     po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items,
     party_type, partyType, outward_id, outwardId, outward_no, outwardNo
   } = req.body;
- 
+
   try {
     const entry = await prisma.inwardEntry.update({
       where: { id: String(id) },
@@ -312,7 +304,7 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
         outward_no: outward_no || outwardNo,
       }
     });
- 
+
     res.json({
       ...entry,
       items: JSON.parse((entry as any).items_json || '[]')
@@ -321,19 +313,12 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to update inward entry', detail: error.message });
   }
 };
- 
+
 export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Response) => {
   const customerId = String(req.params.customerId);
   const user = req.user;
   const companyId = user?.company_id;
-  const isOutward = req.query.purpose === 'outward' || req.query.type === 'outward' || String(req.headers.referer || '').includes('outward');
- 
-  try {
-    const logPath = path.join(__dirname, '../../scratch/api_logs.txt');
-    const logData = `[${new Date().toISOString()}] PENDING_INWARDS | URL: ${req.originalUrl} | Query: ${JSON.stringify(req.query)} | Referer: ${req.headers.referer}\n`;
-    fs.appendFileSync(logPath, logData);
-  } catch (e) {}
- 
+
   try {
     // 0. Lookup the customer name by ID to handle name/id inconsistency in inwards
     const isIdNumeric = !isNaN(parseInt(customerId));
@@ -345,10 +330,10 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         ]
       }
     });
- 
+
     const nameToSearch = customer?.customer_name || String(customerId);
     // console.log(`[DIAGNOSTIC] Searching for Patient: ${customerId} / ${nameToSearch}`);
- 
+
     // 1. Get all inwards for this customer (Temporary broad search for debugging)
     const inwards = await prisma.inwardEntry.findMany({
       where: {
@@ -364,7 +349,6 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
             OR: [
               { status: 'pending' },
               { status: 'partial' },
-              { status: 'completed' },
               { status: null }
             ]
           },
@@ -378,23 +362,23 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         ]
       }
     });
- 
+
     // console.log(`[DIAGNOSTIC] Total Inwards found before filter: ${inwards.length}`);
- 
+
     // 2. Get all invoices to calculate balance
     const relatedInvoices = await (prisma as any).legacyInvoice.findMany({
       where: {
         inward_id: { in: inwards.map(i => i.id) }
       }
     });
- 
+
     // 3. Get all related outwards to calculate what's at vendors
     const relatedOutwards = await prisma.outwardEntry.findMany({
       where: {
         inward_id: { in: inwards.map(i => i.id) }
       }
     });
- 
+
     // Pre-group for O(1) lookup
     const invoiceGroups = new Map<string, any[]>();
     relatedInvoices.forEach((inv: any) => {
@@ -402,65 +386,52 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       if (!invoiceGroups.has(gid)) invoiceGroups.set(gid, []);
       invoiceGroups.get(gid)!.push(inv);
     });
- 
+
     const outwardGroups = new Map<string, any[]>();
     relatedOutwards.forEach((ow: any) => {
       const gid = String(ow.inward_id);
       if (!outwardGroups.has(gid)) outwardGroups.set(gid, []);
       outwardGroups.get(gid)!.push(ow);
     });
- 
+
     const results = inwards.map(entry => {
       const originalItems = JSON.parse(entry.items_json || '[]');
       const invoicedForThisEntry = invoiceGroups.get(String(entry.id)) || [];
       const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
- 
+
       const balanceItems = originalItems.map((item: any) => {
         let totalInvoicedQty = 0;
-        let totalCompletedQty = 0;
-        let totalDeliveredToCustomerQty = 0;
+        let totalDispatchedQty = 0;
         let totalSentToVendorQty = 0;
         let totalReturnedFromVendorQty = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
- 
+
         invoicedForThisEntry.forEach((inv: any) => {
           const invItems = JSON.parse(inv.items_json || '[]');
           const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            const qty = parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0');
-            totalInvoicedQty += qty;
- 
-            const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-            const cleanPaid  = String(inv.paid_amount || '0').replace(/[^\d.]/g, '');
-            const grand = parseFloat(cleanGrand) || 0;
-            const paid = parseFloat(cleanPaid) || 0;
- 
-            if (inv.status === 'PAID' || inv.status === 'COMPLETED' || paid >= (grand - 0.5)) {
-              totalCompletedQty += qty;
-            }
+            totalInvoicedQty += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
           }
         });
- 
+
         outwardsForThisEntry.forEach((ow: any) => {
           const owItems = JSON.parse(ow.items_json || '[]');
           const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
           if (matchingItem) {
-            const qty = parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             if (ow.party_type === 'vendor') {
-              totalSentToVendorQty += qty;
+              totalSentToVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             } else {
-              totalInvoicedQty += qty;
-              totalDeliveredToCustomerQty += qty;
+              totalDispatchedQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
             }
           }
         });
- 
+
         // Find Vendor Returns
-        const vendorInwardsForThisCustomer = inwards.filter(i =>
-           i.party_type === 'vendor' &&
+        const vendorInwardsForThisCustomer = inwards.filter(i => 
+           i.party_type === 'vendor' && 
            outwardsForThisEntry.some(ow => ow.id === i.outward_id)
         );
- 
+
         vendorInwardsForThisCustomer.forEach((vi: any) => {
           const viItems = JSON.parse(vi.items_json || '[]');
           const matchingItem = viItems.find((vii: any) => (vii.description || vii.item_name || '').toLowerCase() === itemIdentifier);
@@ -468,35 +439,32 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
             totalReturnedFromVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
           }
         });
- 
+
         const original = parseFloat(item.quantity || item.qty || '0');
         const currentlyAtVendor = Math.max(0, totalSentToVendorQty - totalReturnedFromVendorQty);
-        const rem = Math.max(0, original - totalInvoicedQty - currentlyAtVendor);
-        const pendingDeliveryQty = Math.max(0, totalCompletedQty - totalDeliveredToCustomerQty);
-        const effectiveRem = isOutward ? pendingDeliveryQty : rem;
- 
+        
+        const billingBalance = Math.max(0, original - totalInvoicedQty);
+        const vendorWorkBalance = Math.max(0, billingBalance - currentlyAtVendor);
+        const dispatchBalance = Math.max(0, original - totalDispatchedQty - currentlyAtVendor);
+
         return {
           ...item,
           originalQty: original,
           invoicedQty: totalInvoicedQty,
-          completedQty: totalCompletedQty,
-          deliveredQty: totalDeliveredToCustomerQty,
-          pendingDeliveryQty,
+          dispatchedQty: totalDispatchedQty,
           sentToVendor: currentlyAtVendor,
           returnedQty: totalReturnedFromVendorQty,
-          remainingQty: effectiveRem,
-          inHouseQty: effectiveRem,
-          quantity: effectiveRem,
-          qty: effectiveRem
+          billingBalance: billingBalance,
+          vendorWorkBalance: vendorWorkBalance,
+          dispatchBalance: dispatchBalance,
+          remainingQty: Math.max(billingBalance, dispatchBalance),
+          inHouseQty: dispatchBalance
         };
       });
- 
-      const hasBalance = isOutward
-        ? balanceItems.some((item: any) => item.pendingDeliveryQty > 0)
-        : balanceItems.some((item: any) => item.remainingQty > 0);
- 
-      const totalRemaining = balanceItems.reduce((acc: number, cur: any) => acc + (cur.remainingQty || 0), 0);
- 
+
+      const hasBalance = balanceItems.some((item: any) => item.remainingQty > 0);
+      // console.log(`[DIAGNOSTIC] Inward #${entry.inward_no}: hasBalance=${hasBalance}, Items=${balanceItems.length}`);
+
       return {
         id: entry.id,
         inward_no: entry.inward_no,
@@ -510,18 +478,17 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         due_date: entry.due_date,
         status: entry.status,
         items: balanceItems,
-        totalRemaining,
         hasBalance
       };
     }).filter(r => r.hasBalance);
- 
+
     res.json(results);
   } catch (error: any) {
     console.error("[DIAGNOSTIC] CRITICAL ERROR:", error);
     res.status(500).json({ error: 'Failed to calculate inward balance', detail: error.message });
   }
 };
- 
+
 export const deleteInwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
@@ -531,21 +498,21 @@ export const deleteInwardEntry = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to delete inward entry', detail: error.message });
   }
 };
- 
+
 export const getInwardById = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
     const entry = await prisma.inwardEntry.findUnique({
       where: { id: String(id) }
     });
- 
+
     if (!entry) {
       return res.status(404).json({ error: 'Inward entry not found' });
     }
- 
+
     // Parse items
     const items = JSON.parse(entry.items_json || '[]');
- 
+
     // Calculate balances
     const invoices = await (prisma as any).legacyInvoice.findMany({
       where: { inward_id: String(entry.id) }
@@ -553,59 +520,49 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     const outwards = await prisma.outwardEntry.findMany({
       where: { inward_id: String(entry.id) }
     });
- 
+
     const balanceItems = items.map((item: any) => {
-      let totalDeducted = 0;
-      let totalCompletedQty = 0;
-      let totalDeliveredToCustomerQty = 0;
+      let totalInvoiced = 0;
+      let totalDispatched = 0;
       const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
- 
+
       // Add Invoiced quantities
       invoices.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
         const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
         if (matchingItem) {
-          const qty = (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
-          totalDeducted += qty;
- 
-          const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-          const cleanPaid  = String(inv.paid_amount || '0').replace(/[^\d.]/g, '');
-          const grand = parseFloat(cleanGrand) || 0;
-          const paid = parseFloat(cleanPaid) || 0;
- 
-          if (inv.status === 'PAID' || inv.status === 'COMPLETED' || paid >= (grand - 0.5)) {
-            totalCompletedQty += qty;
-          }
+          totalInvoiced += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
         }
       });
- 
+
       // Add Outward quantities
       outwards.forEach((ow: any) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
         if (matchingItem) {
-          const qty = parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-          totalDeducted += qty;
-          if (ow.party_type !== 'vendor') {
-            totalDeliveredToCustomerQty += qty;
+          if (ow.party_type === 'vendor') {
+            // Vendor sent qty is tracked but we focus on dispatchBalance for customer return
+          } else {
+             totalDispatched += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
           }
         }
       });
- 
+
       const originalQty = parseFloat(item.quantity || item.qty || '0');
-      const pendingDeliveryQty = Math.max(0, totalCompletedQty - totalDeliveredToCustomerQty);
- 
+      const billingBalance = Math.max(0, originalQty - totalInvoiced);
+      const dispatchBalance = Math.max(0, originalQty - totalDispatched); // Simplified for direct customer return
+
       return {
         ...item,
         originalQty,
-        deductedQty: totalDeducted,
-        completedQty: totalCompletedQty,
-        deliveredQty: totalDeliveredToCustomerQty,
-        pendingDeliveryQty,
-        remainingQty: Math.max(0, originalQty - totalDeducted)
+        invoicedQty: totalInvoiced,
+        dispatchedQty: totalDispatched,
+        billingBalance: billingBalance,
+        dispatchBalance: dispatchBalance,
+        remainingQty: Math.max(billingBalance, dispatchBalance)
       };
     });
- 
+
     res.json({
       ...entry,
       customerName: entry.customer_name,
