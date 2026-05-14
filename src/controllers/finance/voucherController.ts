@@ -81,7 +81,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         orderBy: { date: 'desc' }
       }),
       prisma.voucher.count({ where }),
-      prisma.voucher.findMany({ where, select: { amount: true, tds_amount: true, others_amount: true } })
+      (prisma.voucher as any).findMany({ where, select: { amount: true, tds_amount: true } })
     ]);
 
     const totalCollected = amountRows.reduce(
@@ -360,7 +360,7 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
       const deltaAmount = newAmount - oldAmount;
 
       // 2. Update the Voucher
-      const updatedVoucher = await tx.voucher.update({
+      const updatedVoucher = await (tx.voucher as any).update({
         where: { id: String(id) },
         data: {
           voucher_no,
