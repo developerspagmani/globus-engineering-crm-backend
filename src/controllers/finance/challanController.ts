@@ -86,29 +86,24 @@ export const createChallan = async (req: AuthRequest, res: Response) => {
 
     try {
         const challanData: any = {
-            id: id || undefined,
-            challan_no: String(challan_no),
+            id: id ? String(id) : `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            challan_no: String(challan_no || `DC-${Date.now()}`),
             party_id: party_id ? String(party_id) : null,
-            party_name: party_name || 'N/A',
-            party_type: party_type || 'customer',
-            company_id: sanitizedCompanyId,
+            party_name: String(party_name || 'N/A'),
+            party_type: String(party_type || 'customer'),
+            company_id: sanitizedCompanyId || '',
             date: new Date(),
-            type: type || 'delivery',
-            bill_type: bill_type || 'With Process',
-            status: status || 'dispatched',
-            items_json: JSON.stringify(items || []),
-            vehicle_no: vehicle_no || 'N/A',
-            driver_name: driver_name || 'N/A',
-            inward_id: inward_id || null,
-            inward_no: inward_no || null
+            type: String(type || 'delivery'),
+            bill_type: String(bill_type || 'With Process'),
+            status: String(status || 'dispatched'),
+            items_json: JSON.stringify(Array.isArray(items) ? items : []),
+            vehicle_no: String(vehicle_no || 'N/A'),
+            driver_name: String(driver_name || 'N/A'),
+            inward_id: inward_id ? String(inward_id) : null,
+            inward_no: inward_no ? String(inward_no) : null
         };
 
-        // If no ID provided, Prisma will use the default or we can generate one
-        if (!challanData.id) {
-            challanData.id = `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        }
-
-        console.log('Attempting to create challan with simplified data:', JSON.stringify(challanData, null, 2));
+        console.log('Final Normalized Challan Data:', JSON.stringify(challanData, null, 2));
         
         let attempts = 0;
         let challan;
@@ -120,23 +115,25 @@ export const createChallan = async (req: AuthRequest, res: Response) => {
                 break; // Success!
             } catch (err: any) {
                 attempts++;
+                console.error(`Attempt ${attempts} error:`, err.message || err);
                 if (err.code === 'P1017' && attempts < 3) {
-                   console.warn(`Attempt ${attempts} failed with P1017, retrying...`);
-                   await new Promise(resolve => setTimeout(resolve, 500)); // wait 500ms
+                   await new Promise(resolve => setTimeout(resolve, 500)); 
                    continue;
                 }
-                throw err; // Re-throw if not P1017 or max attempts reached
+                throw err; 
             }
         }
 
-        console.log('Challan created successfully:', challan?.id);
-        res.status(201).json({ ...challan, items: JSON.parse(challan?.items_json || '[]') });
+        if (!challan) throw new Error("Challan creation returned empty");
+
+        console.log('Challan created successfully:', challan.id);
+        return res.status(201).json({ ...challan, items: JSON.parse(challan.items_json || '[]') });
   } catch (error: any) {
-    console.error('❌ PRISMA CHALLAN CREATE ERROR:', error);
+    console.error('❌ PRISMA CHALLAN CREATE ERROR:', error.message || error);
     return res.status(500).json({ 
       error: 'Failed to create challan', 
-      message: error.message,
-      detail: error.code || 'UNKNOWN_ERROR'
+      message: error.message || 'Unknown database error',
+      code: error.code
     });
   }
 };
@@ -152,20 +149,20 @@ export const updateChallan = async (req: AuthRequest, res: Response) => {
             challan = await prisma.challan.update({
                 where: { id: String(id) },
                 data: {
-                    challan_no,
+                    challan_no: challan_no ? String(challan_no) : undefined,
                     party_id: party_id ? String(party_id) : undefined,
-                    party_name,
-                    party_type,
-                    company_id,
+                    party_name: party_name ? String(party_name) : undefined,
+                    party_type: party_type ? String(party_type) : undefined,
+                    company_id: company_id ? String(company_id) : undefined,
                     date: date ? new Date(date) : undefined,
-                    type,
-                    bill_type,
-                    status,
-                    items_json: items ? JSON.stringify(items) : undefined,
-                    vehicle_no,
-                    driver_name,
-                    inward_id,
-                    inward_no
+                    type: type ? String(type) : undefined,
+                    bill_type: bill_type ? String(bill_type) : undefined,
+                    status: status ? String(status) : undefined,
+                    items_json: items ? JSON.stringify(Array.isArray(items) ? items : []) : undefined,
+                    vehicle_no: vehicle_no ? String(vehicle_no) : undefined,
+                    driver_name: driver_name ? String(driver_name) : undefined,
+                    inward_id: inward_id ? String(inward_id) : undefined,
+                    inward_no: inward_no ? String(inward_no) : undefined
                 }
             });
             break;

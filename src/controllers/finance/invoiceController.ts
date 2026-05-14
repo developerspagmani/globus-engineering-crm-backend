@@ -282,8 +282,9 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
 export const createInvoice = async (req: AuthRequest, res: Response) => {
   const {
     invoiceNumber, date, dueDate, customerId, customerName,
-    address, subTotal, grandTotal, items, billType, inwardId, company_id, companyId, notes,
-    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate
+    address, subTotal, grandTotal, items, billType, inwardId, inward_no, company_id, companyId, notes,
+    po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate,
+    vehicleNo, vehicle_no
   } = req.body;
 
   const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18'));
@@ -403,89 +404,53 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
         }
       }
 
-      // Add Ledger Entry for Invoice
-      let partyId = customerId ? String(customerId) : '';
-      let partyName = customerName || 'Unknown';
-      let partyType = 'customer';
-      let ledgerType = 'debit'; // Sales invoice is debit
 
+      // --- CONSOLIDATED CHALLAN LOGIC ---
       if (inwardId) {
-        const inward = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
-        if (inward) {
-          if (inward.party_type === 'vendor') {
-            partyId = inward.vendor_id || '';
-            partyName = inward.vendor_name || 'Unknown Vendor';
-            partyType = 'vendor';
-            ledgerType = 'credit'; // Vendor invoice is credit
+          const existingChallans = await tx.challan.findMany({
+              where: { inward_id: String(inwardId) }
+          });
+          const existingChallan = existingChallans[0];
+          
+          const isWop = String(billType || '').toLowerCase().includes('without');
+          const currentItems = (items || []).map((it: any) => ({
+              description: it.description,
+              quantity: isWop ? 0 : Number(it.quantity || 0),
+              wopQty: isWop ? Number(it.quantity || 0) : Number(it.wopQty || 0),
+              unit: it.unit || 'pcs',
+              hsnCode: it.hsnCode || ''
+          }));
+
+          if (existingChallan) {
+              const oldItems = JSON.parse(existingChallan.items_json || '[]');
+              await tx.challan.update({
+                  where: { id: existingChallan.id },
+                  data: {
+                      items_json: JSON.stringify([...oldItems, ...currentItems]),
+                      vehicle_no: vehicleNo || vehicle_no || existingChallan.vehicle_no || 'N/A'
+                  }
+              });
           } else {
-            partyId = inward.customer_id || partyId;
-            partyName = inward.customer_name || partyName;
-            partyType = 'customer';
-            ledgerType = 'debit';
+              await tx.challan.create({
+                  data: {
+                      id: `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                      challan_no: `DC-${newInvoice.invoice_no || newInvoice.id}`,
+                      party_id: String(customerId || ''),
+                      party_name: String(customerName || 'N/A'),
+                      party_type: 'customer',
+                      company_id: String(finalCompanyId || ''),
+                      date: new Date(),
+                      type: 'delivery',
+                      bill_type: billType || 'Both',
+                      status: 'dispatched',
+                      items_json: JSON.stringify(currentItems),
+                      vehicle_no: String(vehicleNo || vehicle_no || 'N/A'),
+                      driver_name: 'N/A',
+                      inward_id: String(inwardId),
+                      inward_no: String(inward_no || dc_no || dcNo || 'N/A')
+                  }
+              });
           }
-        }
-      } else if (partyId) {
-        const isNumeric = /^\d+$/.test(partyId);
-        if (!isNumeric) {
-          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
-          if (vendor) {
-            partyType = 'vendor';
-            ledgerType = 'credit';
-            partyName = vendor.name || partyName;
-          }
-        } else {
-          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
-          if (vendor) {
-            partyType = 'vendor';
-            ledgerType = 'credit';
-            partyName = vendor.name || partyName;
-          } else {
-            const customer = await tx.legacyCustomer.findUnique({ where: { id: parseInt(partyId) } });
-            if (customer) {
-              partyType = 'customer';
-              ledgerType = 'debit';
-              partyName = customer.customer_name || partyName;
-            }
-          }
-        }
-      }
-
-      if (partyId && finalGrandTotal > 0) {
-        const lastEntry = await (tx.ledgerEntry as any).findFirst({
-          where: {
-            party_id: String(partyId),
-            company_id: finalCompanyId ? String(finalCompanyId) : undefined
-          },
-          orderBy: { created_at: 'desc' }
-        });
-
-        const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-        let newBalance = lastBalance;
-        if (partyType === 'vendor') {
-          newBalance = ledgerType === 'credit' ? (lastBalance + finalGrandTotal) : (lastBalance - finalGrandTotal);
-        } else {
-          newBalance = ledgerType === 'debit' ? (lastBalance + finalGrandTotal) : (lastBalance - finalGrandTotal);
-        }
-
-        await (tx.ledgerEntry as any).create({
-          data: {
-            id: crypto.randomUUID(),
-            party_id: String(partyId),
-            party_name: partyName,
-            party_type: partyType,
-            company_id: finalCompanyId ? String(finalCompanyId) : null,
-            date: date ? new Date(date) : new Date(),
-            vch_type: 'INVOICE',
-            vch_no: String(newInvoice.invoice_no || newInvoice.id),
-            type: ledgerType,
-            amount: finalGrandTotal,
-            balance: newBalance,
-            description: partyType === 'vendor' 
-              ? `Purchase Invoice: ${newInvoice.invoice_no || newInvoice.id}`
-              : `Sales Invoice: ${newInvoice.invoice_no || newInvoice.id}`,
-            reference_id: String(newInvoice.id)
-          }
-        });
       }
 
       return newInvoice;
@@ -610,7 +575,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
         }
       }
 
-      // Update ledger entry for the invoice
+      // --- UPDATE LEDGER ENTRIES FOR INVOICE ---
       await (tx.ledgerEntry as any).deleteMany({
         where: {
           reference_id: String(updatedInvoice.id),
@@ -623,88 +588,71 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
       const actualCustomerName = customerName !== undefined ? customerName : updatedInvoice.customer_name;
       const actualDate = date ? new Date(date) : updatedInvoice.invoice_date;
 
-      let partyId = actualCustomerId ? String(actualCustomerId) : '';
-      let partyName = actualCustomerName || 'Unknown';
-      let partyType = 'customer';
-      let ledgerType = 'debit';
+      const entriesToCreate: any[] = [];
 
-      if (effectiveInwardId) {
-        const inward = await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } });
-        if (inward) {
-          if (inward.party_type === 'vendor') {
-            partyId = inward.vendor_id || '';
-            partyName = inward.vendor_name || 'Unknown Vendor';
-            partyType = 'vendor';
-            ledgerType = 'credit';
-          } else {
-            partyId = inward.customer_id || partyId;
-            partyName = inward.customer_name || partyName;
-            partyType = 'customer';
-            ledgerType = 'debit';
-          }
-        }
-      } else if (partyId) {
-        const isNumeric = /^\d+$/.test(partyId);
-        if (!isNumeric) {
-          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
-          if (vendor) {
-            partyType = 'vendor';
-            ledgerType = 'credit';
-            partyName = vendor.name || partyName;
-          }
-        } else {
-          const vendor = await tx.vendor.findUnique({ where: { id: partyId } });
-          if (vendor) {
-            partyType = 'vendor';
-            ledgerType = 'credit';
-            partyName = vendor.name || partyName;
-          } else {
-            const customer = await tx.legacyCustomer.findUnique({ where: { id: parseInt(partyId) } });
-            if (customer) {
-              partyType = 'customer';
-              ledgerType = 'debit';
-              partyName = customer.customer_name || partyName;
-            }
-          }
-        }
-      }
-
-      if (partyId && actualGrandTotal > 0) {
-        const lastEntry = await (tx.ledgerEntry as any).findFirst({
+      // 1. Always create the Customer Debit
+      if (actualCustomerId && actualGrandTotal > 0) {
+        const custLastEntry = await (tx.ledgerEntry as any).findFirst({
           where: {
-            party_id: String(partyId),
+            party_id: String(actualCustomerId),
             company_id: finalCompanyId ? String(finalCompanyId) : undefined
           },
           orderBy: { created_at: 'desc' }
         });
+        const custLastBal = custLastEntry ? (custLastEntry.balance || 0) : 0;
+        const custNewBal = custLastBal + actualGrandTotal;
 
-        const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-        let newBalance = lastBalance;
-        if (partyType === 'vendor') {
-          newBalance = ledgerType === 'credit' ? (lastBalance + actualGrandTotal) : (lastBalance - actualGrandTotal);
-        } else {
-          newBalance = ledgerType === 'debit' ? (lastBalance + actualGrandTotal) : (lastBalance - actualGrandTotal);
-        }
+        entriesToCreate.push({
+          id: crypto.randomUUID(),
+          party_id: String(actualCustomerId),
+          party_name: actualCustomerName || 'Unknown Customer',
+          party_type: 'customer',
+          company_id: finalCompanyId ? String(finalCompanyId) : null,
+          date: actualDate ? new Date(actualDate) : new Date(),
+          vch_type: 'INVOICE',
+          vch_no: String(updatedInvoice.invoice_no || updatedInvoice.id),
+          type: 'debit',
+          amount: actualGrandTotal,
+          balance: custNewBal,
+          description: `Sales Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`,
+          reference_id: String(updatedInvoice.id)
+        });
+      }
 
-        await (tx.ledgerEntry as any).create({
-          data: {
+      // 2. If it's a Vendor Inward, ALSO create the Vendor Credit
+      if (effectiveInwardId) {
+        const inward = await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } });
+        if (inward && inward.party_type === 'vendor' && inward.vendor_id) {
+          const vendLastEntry = await (tx.ledgerEntry as any).findFirst({
+            where: {
+              party_id: String(inward.vendor_id),
+              company_id: finalCompanyId ? String(finalCompanyId) : undefined
+            },
+            orderBy: { created_at: 'desc' }
+          });
+          const vendLastBal = vendLastEntry ? (vendLastEntry.balance || 0) : 0;
+          const vendNewBal = vendLastBal + actualGrandTotal;
+
+          entriesToCreate.push({
             id: crypto.randomUUID(),
-            party_id: String(partyId),
-            party_name: partyName,
-            party_type: partyType,
+            party_id: String(inward.vendor_id),
+            party_name: inward.vendor_name || 'Unknown Vendor',
+            party_type: 'vendor',
             company_id: finalCompanyId ? String(finalCompanyId) : null,
             date: actualDate ? new Date(actualDate) : new Date(),
             vch_type: 'INVOICE',
             vch_no: String(updatedInvoice.invoice_no || updatedInvoice.id),
-            type: ledgerType,
+            type: 'credit',
             amount: actualGrandTotal,
-            balance: newBalance,
-            description: partyType === 'vendor' 
-              ? `Purchase Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`
-              : `Sales Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`,
+            balance: vendNewBal,
+            description: `Job Work Charge (Updated) (Inward: ${inward.inward_no}): Invoice ${updatedInvoice.invoice_no || updatedInvoice.id}`,
             reference_id: String(updatedInvoice.id)
-          }
-        });
+          });
+        }
+      }
+
+      for (const entryData of entriesToCreate) {
+        await (tx.ledgerEntry as any).create({ data: entryData });
       }
 
       return updatedInvoice;

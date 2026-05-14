@@ -77,13 +77,15 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         orderBy: { date: 'desc' }
       }),
       prisma.voucher.count({ where }),
-      prisma.voucher.findMany({ where, select: { amount: true } })
+      prisma.voucher.findMany({ where, select: { amount: true, tds_amount: true } })
     ]);
 
     const totalCollected = amountRows.reduce(
       (sum: number, v: any) => sum + (parseFloat(String(v.amount || '0').replace(/[^\d.]/g, '')) || 0),
       0
     );
+
+    const totalTDS = amountRows.reduce((sum: number, v: any) => sum + (Number(v.tds_amount) || 0), 0);
 
     res.json({
       items: vouchers.map((v: any) => ({ ...v, items: JSON.parse(v.items_json || '[]') })),
@@ -93,7 +95,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         limit,
         totalPages: Math.ceil(totalCount / limit)
       },
-      aggregates: { totalCollected }
+      aggregates: { totalCollected, totalTDS }
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch vouchers', detail: error.message });
