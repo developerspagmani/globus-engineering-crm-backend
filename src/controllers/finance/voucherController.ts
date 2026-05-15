@@ -225,10 +225,15 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
           const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
           const currentTDS = parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0;
           const currentOthers = parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0;
+          // totalSettlementAmount = net paid (cash/bank) + adjustments (TDS + Others)
+          // This represents the gross invoice amount being settled
           const totalSettlementAmount = finalAmount + currentTDS + currentOthers;
+          // Ledger entry stores the NET amount actually paid (finalAmount)
+          // The adjustment (TDS + Others) reduces what the party owes but is NOT a cash receipt/payment
+          const ledgerAmount = finalAmount;
 
           let entryType = type === 'receipt' ? 'credit' : 'debit';
-          let change = totalSettlementAmount;
+          let change = ledgerAmount;
           let newBalance = lastBalance;
 
           if (party_type === 'customer') {
@@ -249,7 +254,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
               vch_type: type.toUpperCase(),
               vch_no: voucher.voucher_no || voucher.id,
               type: entryType,
-              amount: totalSettlementAmount,
+              amount: ledgerAmount,
               balance: newBalance,
               description: `${type.toUpperCase()} - ${voucher.voucher_no || voucher.id}${currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : ''}${currentOthers > 0 ? ` (Others: ₹${currentOthers})` : ''}`,
               reference_id: String(voucher.id)
@@ -369,9 +374,12 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
           const currentTDS = parseFloat(String(tds_amount ?? tdsAmount ?? oldVoucher.tds_amount ?? '0')) || 0;
           const currentOthers = parseFloat(String(others_amount ?? othersAmount ?? oldVoucher.others_amount ?? '0')) || 0;
           const totalSettlementAmount = newAmount + currentTDS + currentOthers;
+          // Ledger entry stores the NET amount actually paid (newAmount)
+          // The adjustment (TDS + Others) reduces what the party owes but is NOT a cash receipt/payment
+          const ledgerAmount = newAmount;
 
           let entryType = type === 'receipt' ? 'credit' : 'debit';
-          let change = totalSettlementAmount;
+          let change = ledgerAmount;
           let newBalance = lastBalance;
 
           if (party_type === 'customer') {
@@ -392,7 +400,7 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
               vch_type: type.toUpperCase(),
               vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
               type: entryType,
-              amount: totalSettlementAmount,
+              amount: ledgerAmount,
               balance: newBalance,
               description: `${type.toUpperCase()} - ${updatedVoucher.voucher_no || updatedVoucher.id} (Updated)${currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : ''}${currentOthers > 0 ? ` (Others: ₹${currentOthers})` : ''}`,
               reference_id: String(updatedVoucher.id)
