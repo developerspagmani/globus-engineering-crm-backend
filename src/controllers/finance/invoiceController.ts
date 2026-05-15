@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import { logAudit } from '../../utils/auditLogger';
+import { withRetry } from '../../utils/retry';
 import crypto from 'crypto';
 
 export const getAllInvoices = async (req: AuthRequest, res: Response) => {
@@ -359,128 +360,196 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       dc_date: (dc_date || dcDate) ? new Date(dc_date || dcDate) : null,
     };
 
-    const invoice = await prisma.$transaction(async (tx) => {
-      // If we have an inwardId, fetch it first to get its actual number for the invoice record
-      let actualInwardNo: number | null = null;
-      if (inwardId) {
-        const inward = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
-        if (inward) {
-          const matched = String(inward.inward_no || '').match(/\d+/);
-          actualInwardNo = matched ? parseInt(matched[0]) : null;
-        }
-      }
-
-      const newInvoice = await (tx as any).legacyInvoice.create({
-        data: {
-          ...invoiceData,
-          inward_no: actualInwardNo || invNo // Use actual inward no if found, fallback to invoice no for legacy compatibility
-        }
-      });
-
-      // Update Inward status if linked
-      if (inwardId) {
-        const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
-        if (entry) {
-          const originalItems = JSON.parse(entry.items_json || '[]');
-          const inwardIdStr = String(inwardId);
-          
-          const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
-          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
-          
-          const billedMap = new Map<string, number>();
-          const dispatchedMap = new Map<string, number>();
-
-          allInvoices.forEach((inv: any) => {
-            const invItems = JSON.parse(inv.items_json || '[]');
-            invItems.forEach((ii: any) => {
-              const iden = (ii.description || ii.item_name || '').toLowerCase();
-              billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
-            });
-          });
-
-          allOutwards.forEach((ow: any) => {
-            const owItems = JSON.parse(ow.items_json || '[]');
-            owItems.forEach((oi: any) => {
-              const iden = (oi.description || oi.item_name || '').toLowerCase();
-              if (ow.party_type !== 'vendor') {
-                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
-              }
-            });
-          });
-
-          let allBilled = true;
-          let allDispatched = true;
-
-          originalItems.forEach((item: any) => {
-             const iden = (item.description || item.item_name || '').toLowerCase();
-             const itemBilled = billedMap.get(iden) || 0;
-             const itemDispatched = dispatchedMap.get(iden) || 0;
-             const original = parseFloat(item.quantity || item.qty || '0');
-             if (itemBilled < original - 0.5) allBilled = false;
-             if (itemDispatched < original - 0.5) allDispatched = false;
-          });
-
-          await tx.inwardEntry.update({
-            where: { id: inwardIdStr },
-            data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
-          });
-        }
-      }
-
-
-      // --- CONSOLIDATED CHALLAN LOGIC ---
-      if (inwardId) {
-          const existingChallans = await tx.challan.findMany({
-              where: { inward_id: String(inwardId) }
-          });
-          const existingChallan = existingChallans[0];
-          
-          const isWop = String(billType || '').toLowerCase().includes('without');
-          const currentItems = (items || []).map((it: any) => ({
-              description: it.description,
-              quantity: isWop ? 0 : Number(it.quantity || 0),
-              wopQty: isWop ? Number(it.quantity || 0) : Number(it.wopQty || 0),
-              unit: it.unit || 'pcs',
-              hsnCode: it.hsnCode || ''
-          }));
-
-          if (existingChallan) {
-              const oldItems = JSON.parse(existingChallan.items_json || '[]');
-              await tx.challan.update({
-                  where: { id: existingChallan.id },
-                  data: {
-                      items_json: JSON.stringify([...oldItems, ...currentItems]),
-                      vehicle_no: vehicleNo || vehicle_no || existingChallan.vehicle_no || 'N/A'
-                  }
-              });
-          } else {
-              await tx.challan.create({
-                  data: {
-                      id: `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                      challan_no: `DC-${newInvoice.invoice_no || newInvoice.id}`,
-                      party_id: String(customerId || ''),
-                      party_name: String(customerName || 'N/A'),
-                      party_type: 'customer',
-                      company_id: String(finalCompanyId || ''),
-                      date: new Date(),
-                      type: 'delivery',
-                      bill_type: billType || 'Both',
-                      status: 'dispatched',
-                      items_json: JSON.stringify(currentItems),
-                      vehicle_no: String(vehicleNo || vehicle_no || 'N/A'),
-                      driver_name: 'N/A',
-                      inward_id: String(inwardId),
-                      inward_no: String(inward_no || dc_no || dcNo || 'N/A')
-                  }
-              });
+    const invoice = await withRetry(async () => {
+      return await prisma.$transaction(async (tx) => {
+        // If we have an inwardId, fetch it first to get its actual number for the invoice record
+        let actualInwardNo: number | null = null;
+        if (inwardId) {
+          const inward = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
+          if (inward) {
+            const matched = String(inward.inward_no || '').match(/\d+/);
+            actualInwardNo = matched ? parseInt(matched[0]) : null;
           }
-      }
+        }
 
-      return newInvoice;
-    }, {
-      maxWait: 15000,
-      timeout: 45000
-    });
+        const newInvoice = await (tx as any).legacyInvoice.create({
+          data: {
+            ...invoiceData,
+            inward_no: actualInwardNo || invNo // Use actual inward no if found, fallback to invoice no for legacy compatibility
+          }
+        });
+
+        // Update Inward status if linked
+        if (inwardId) {
+          const entry = await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } });
+          if (entry) {
+            const originalItems = JSON.parse(entry.items_json || '[]');
+            const inwardIdStr = String(inwardId);
+            
+            const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
+            const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+            
+            const billedMap = new Map<string, number>();
+            const dispatchedMap = new Map<string, number>();
+
+            allInvoices.forEach((inv: any) => {
+              const invItems = JSON.parse(inv.items_json || '[]');
+              invItems.forEach((ii: any) => {
+                const iden = (ii.description || ii.item_name || '').toLowerCase();
+                billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
+              });
+            });
+
+            allOutwards.forEach((ow: any) => {
+              const owItems = JSON.parse(ow.items_json || '[]');
+              owItems.forEach((oi: any) => {
+                const iden = (oi.description || oi.item_name || '').toLowerCase();
+                if (ow.party_type !== 'vendor') {
+                  dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+                }
+              });
+            });
+
+            let allBilled = true;
+            let allDispatched = true;
+
+            originalItems.forEach((item: any) => {
+               const iden = (item.description || item.item_name || '').toLowerCase();
+               const itemBilled = billedMap.get(iden) || 0;
+               const itemDispatched = dispatchedMap.get(iden) || 0;
+               const original = parseFloat(item.quantity || item.qty || '0');
+               if (itemBilled < original - 0.5) allBilled = false;
+               if (itemDispatched < original - 0.5) allDispatched = false;
+            });
+
+            await tx.inwardEntry.update({
+              where: { id: inwardIdStr },
+              data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
+            });
+          }
+        }
+
+        // --- CONSOLIDATED CHALLAN LOGIC ---
+        if (inwardId) {
+            const existingChallans = await tx.challan.findMany({
+                where: { inward_id: String(inwardId) }
+            });
+            const existingChallan = existingChallans[0];
+            
+            const isWop = String(billType || '').toLowerCase().includes('without');
+            const currentItems = (items || []).map((it: any) => ({
+                description: it.description,
+                quantity: isWop ? 0 : Number(it.quantity || 0),
+                wopQty: isWop ? Number(it.quantity || 0) : Number(it.wopQty || 0),
+                unit: it.unit || 'pcs',
+                hsnCode: it.hsnCode || ''
+            }));
+
+            if (existingChallan) {
+                const oldItems = JSON.parse(existingChallan.items_json || '[]');
+                await tx.challan.update({
+                    where: { id: existingChallan.id },
+                    data: {
+                        items_json: JSON.stringify([...oldItems, ...currentItems]),
+                        vehicle_no: vehicleNo || vehicle_no || existingChallan.vehicle_no || 'N/A'
+                    }
+                });
+            } else {
+                await tx.challan.create({
+                    data: {
+                        id: `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+                        challan_no: `DC-${newInvoice.invoice_no || newInvoice.id}`,
+                        party_id: String(customerId || ''),
+                        party_name: String(customerName || 'N/A'),
+                        party_type: 'customer',
+                        company_id: String(finalCompanyId || ''),
+                        date: new Date(),
+                        type: 'delivery',
+                        bill_type: billType || 'Both',
+                        status: 'dispatched',
+                        items_json: JSON.stringify(currentItems),
+                        vehicle_no: String(vehicleNo || vehicle_no || 'N/A'),
+                        driver_name: 'N/A',
+                        inward_id: String(inwardId),
+                        inward_no: String(inward_no || dc_no || dcNo || 'N/A')
+                    }
+                });
+            }
+        }
+
+        // --- LEDGER ENTRY LOGIC ---
+        const entriesToCreate: any[] = [];
+        const inward = inwardId ? await tx.inwardEntry.findUnique({ where: { id: String(inwardId) } }) : null;
+
+        // 1. Logic for Vendor Invoices (Payables)
+        if (inward && inward.party_type === 'vendor' && inward.vendor_id) {
+          const vendLastEntry = await (tx.ledgerEntry as any).findFirst({
+            where: {
+              party_id: String(inward.vendor_id),
+              company_id: finalCompanyId ? String(finalCompanyId) : undefined
+            },
+            orderBy: { created_at: 'desc' }
+          });
+          const vendLastBal = vendLastEntry ? (vendLastEntry.balance || 0) : 0;
+          const vendLastNum = parseFloat(String(vendLastBal)) || 0;
+          const vendNewBal = vendLastNum + finalGrandTotal;
+
+          entriesToCreate.push({
+            id: crypto.randomUUID(),
+            party_id: String(inward.vendor_id),
+            party_name: inward.vendor_name || 'Unknown Vendor',
+            party_type: 'vendor',
+            company_id: finalCompanyId ? String(finalCompanyId) : null,
+            date: date ? new Date(date) : new Date(),
+            vch_type: 'INVOICE',
+            vch_no: String(newInvoice.invoice_no || newInvoice.id),
+            type: 'credit',
+            amount: finalGrandTotal,
+            balance: vendNewBal,
+            description: `Job Work Charge (Inward: ${inward.inward_no}): Invoice ${newInvoice.invoice_no || newInvoice.id}`,
+            reference_id: String(newInvoice.id)
+          });
+        } 
+        // 2. Logic for Customer Invoices (Receivables)
+        else if (customerId && finalGrandTotal > 0) {
+          const custLastEntry = await (tx.ledgerEntry as any).findFirst({
+            where: {
+              party_id: String(customerId),
+              company_id: finalCompanyId ? String(finalCompanyId) : undefined
+            },
+            orderBy: { created_at: 'desc' }
+          });
+          const custLastBal = custLastEntry ? (custLastEntry.balance || 0) : 0;
+          const custLastNum = parseFloat(String(custLastBal)) || 0;
+          const custNewBal = custLastNum + finalGrandTotal;
+
+          entriesToCreate.push({
+            id: crypto.randomUUID(),
+            party_id: String(customerId),
+            party_name: customerName || 'Unknown Customer',
+            party_type: 'customer',
+            company_id: finalCompanyId ? String(finalCompanyId) : null,
+            date: date ? new Date(date) : new Date(),
+            vch_type: 'INVOICE',
+            vch_no: String(newInvoice.invoice_no || newInvoice.id),
+            type: 'debit',
+            amount: finalGrandTotal,
+            balance: custNewBal,
+            description: `Sales Invoice: ${newInvoice.invoice_no || newInvoice.id}`,
+            reference_id: String(newInvoice.id)
+          });
+        }
+
+        for (const entryData of entriesToCreate) {
+          await (tx.ledgerEntry as any).create({ data: entryData });
+        }
+
+        return newInvoice;
+      }, {
+        maxWait: 15000,
+        timeout: 45000
+      });
+    }, 3, 2000);
 
     // Logging Audit
     await logAudit({
@@ -534,140 +603,111 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
   try {
     const invoiceIdNum = parseInt(String(id));
 
-    const invoice = await prisma.$transaction(async (tx) => {
-      const oldInvoice = await (tx as any).legacyInvoice.findUnique({
-        where: { id: invoiceIdNum }
-      });
+    const invoice = await withRetry(async () => {
+      return await prisma.$transaction(async (tx) => {
+        const oldInvoice = await (tx as any).legacyInvoice.findUnique({
+          where: { id: invoiceIdNum }
+        });
 
-      if (!oldInvoice) {
-        throw new Error('Invoice not found');
-      }
-
-      const updatedInvoice = await (tx as any).legacyInvoice.update({
-        where: { id: invoiceIdNum },
-        data: {
-          invoice_date: date ? new Date(date) : undefined,
-          due_date: dueDate ? new Date(dueDate) : undefined,
-          customer_id: customerId ? parseInt(String(customerId)) : undefined,
-          customer_name: customerName,
-          address,
-          total: subTotal ? String(subTotal) : undefined,
-          grand_total: grandTotal ? String(grandTotal) : undefined,
-          items_json: items ? JSON.stringify(items) : undefined,
-          bill_type: billType === 'With Process' ? 'with_process' :
-            billType === 'Without Process' ? 'without_process' :
-              billType === 'Both' ? 'both' : billType,
-          inward_id: inwardId ? String(inwardId) : undefined,
-          po_no: req.body.po_no || req.body.poNo,
-          po_date: (req.body.po_date || req.body.poDate) ? new Date(req.body.po_date || req.body.poDate) : undefined,
-          dc_no: req.body.dc_no || req.body.dcNo,
-          dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
-          status: status?.toUpperCase(),
-          gstin: gstin,
-          state: state,
-          notes: notes,
-          ...taxUpdate
+        if (!oldInvoice) {
+          throw new Error('Invoice not found');
         }
-      });
 
-      // Smart Status Update for Inward if linked
-      const effectiveInwardId = inwardId !== undefined ? inwardId : updatedInvoice.inward_id;
-          // DUAL-COMPLETION STATUS UPDATE
-          const inwardIdStr = String(effectiveInwardId);
-          const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
-          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
-          
-          const billedMap = new Map<string, number>();
-          const dispatchedMap = new Map<string, number>();
-
-          allInvoices.forEach((inv: any) => {
-            const invItems = JSON.parse(inv.items_json || '[]');
-            invItems.forEach((ii: any) => {
-              const iden = (ii.description || ii.item_name || '').toLowerCase();
-              billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
-            });
-          });
-
-          allOutwards.forEach((ow: any) => {
-            const owItems = JSON.parse(ow.items_json || '[]');
-            owItems.forEach((oi: any) => {
-              const iden = (oi.description || oi.item_name || '').toLowerCase();
-              if (ow.party_type !== 'vendor') {
-                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
-              }
-            });
-          });
-
-          let allBilled = true;
-          let allDispatched = true;
-
-          // Note: we need originalItems here. In updateInvoice, it might be missing if not fetched.
-          const entry = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
-          if (entry) {
-            const originalItems = JSON.parse(entry.items_json || '[]');
-
-            originalItems.forEach((item: any) => {
-               const iden = (item.description || item.item_name || '').toLowerCase();
-               const itemBilled = billedMap.get(iden) || 0;
-               const itemDispatched = dispatchedMap.get(iden) || 0;
-               const original = parseFloat(item.quantity || item.qty || '0');
-               if (itemBilled < original - 0.5) allBilled = false;
-               if (itemDispatched < original - 0.5) allDispatched = false;
-            });
-
-            await tx.inwardEntry.update({
-              where: { id: inwardIdStr },
-              data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
-            });
+        const updatedInvoice = await (tx as any).legacyInvoice.update({
+          where: { id: invoiceIdNum },
+          data: {
+            invoice_date: date ? new Date(date) : undefined,
+            due_date: dueDate ? new Date(dueDate) : undefined,
+            customer_id: customerId ? parseInt(String(customerId)) : undefined,
+            customer_name: customerName,
+            address,
+            total: subTotal ? String(subTotal) : undefined,
+            grand_total: grandTotal ? String(grandTotal) : undefined,
+            items_json: items ? JSON.stringify(items) : undefined,
+            bill_type: billType === 'With Process' ? 'with_process' :
+              billType === 'Without Process' ? 'without_process' :
+                billType === 'Both' ? 'both' : billType,
+            inward_id: inwardId ? String(inwardId) : undefined,
+            po_no: req.body.po_no || req.body.poNo,
+            po_date: (req.body.po_date || req.body.poDate) ? new Date(req.body.po_date || req.body.poDate) : undefined,
+            dc_no: req.body.dc_no || req.body.dcNo,
+            dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
+            status: status?.toUpperCase(),
+            gstin: gstin,
+            state: state,
+            notes: notes,
+            ...taxUpdate
           }
+        });
 
-      // --- UPDATE LEDGER ENTRIES FOR INVOICE ---
-      await (tx.ledgerEntry as any).deleteMany({
-        where: {
-          reference_id: String(updatedInvoice.id),
-          vch_type: 'INVOICE'
-        }
-      });
+        // Smart Status Update for Inward if linked
+        const effectiveInwardId = inwardId !== undefined ? inwardId : updatedInvoice.inward_id;
+            // DUAL-COMPLETION STATUS UPDATE
+            const inwardIdStr = String(effectiveInwardId);
+            const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
+            const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+            
+            const billedMap = new Map<string, number>();
+            const dispatchedMap = new Map<string, number>();
 
-      const actualGrandTotal = finalGrandTotal !== undefined ? finalGrandTotal : parseFloat(String(updatedInvoice.grand_total || '0').replace(/[^\d.]/g, ''));
-      const actualCustomerId = customerId !== undefined ? customerId : updatedInvoice.customer_id;
-      const actualCustomerName = customerName !== undefined ? customerName : updatedInvoice.customer_name;
-      const actualDate = date ? new Date(date) : updatedInvoice.invoice_date;
+            allInvoices.forEach((inv: any) => {
+              const invItems = JSON.parse(inv.items_json || '[]');
+              invItems.forEach((ii: any) => {
+                const iden = (ii.description || ii.item_name || '').toLowerCase();
+                billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
+              });
+            });
 
-      const entriesToCreate: any[] = [];
+            allOutwards.forEach((ow: any) => {
+              const owItems = JSON.parse(ow.items_json || '[]');
+              owItems.forEach((oi: any) => {
+                const iden = (oi.description || oi.item_name || '').toLowerCase();
+                if (ow.party_type !== 'vendor') {
+                  dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+                }
+              });
+            });
 
-      // 1. Always create the Customer Debit
-      if (actualCustomerId && actualGrandTotal > 0) {
-        const custLastEntry = await (tx.ledgerEntry as any).findFirst({
+            let allBilled = true;
+            let allDispatched = true;
+
+            // Note: we need originalItems here. In updateInvoice, it might be missing if not fetched.
+            const entry = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
+            if (entry) {
+              const originalItems = JSON.parse(entry.items_json || '[]');
+
+              originalItems.forEach((item: any) => {
+                 const iden = (item.description || item.item_name || '').toLowerCase();
+                 const itemBilled = billedMap.get(iden) || 0;
+                 const itemDispatched = dispatchedMap.get(iden) || 0;
+                 const original = parseFloat(item.quantity || item.qty || '0');
+                 if (itemBilled < original - 0.5) allBilled = false;
+                 if (itemDispatched < original - 0.5) allDispatched = false;
+              });
+
+              await tx.inwardEntry.update({
+                where: { id: inwardIdStr },
+                data: { status: (allBilled && allDispatched) ? 'completed' : 'pending' }
+              });
+            }
+
+        // --- UPDATE LEDGER ENTRIES FOR INVOICE ---
+        await (tx.ledgerEntry as any).deleteMany({
           where: {
-            party_id: String(actualCustomerId),
-            company_id: finalCompanyId ? String(finalCompanyId) : undefined
-          },
-          orderBy: { created_at: 'desc' }
+            reference_id: String(updatedInvoice.id),
+            vch_type: 'INVOICE'
+          }
         });
-        const custLastBal = custLastEntry ? (custLastEntry.balance || 0) : 0;
-        const custNewBal = custLastBal + actualGrandTotal;
 
-        entriesToCreate.push({
-          id: crypto.randomUUID(),
-          party_id: String(actualCustomerId),
-          party_name: actualCustomerName || 'Unknown Customer',
-          party_type: 'customer',
-          company_id: finalCompanyId ? String(finalCompanyId) : null,
-          date: actualDate ? new Date(actualDate) : new Date(),
-          vch_type: 'INVOICE',
-          vch_no: String(updatedInvoice.invoice_no || updatedInvoice.id),
-          type: 'debit',
-          amount: actualGrandTotal,
-          balance: custNewBal,
-          description: `Sales Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`,
-          reference_id: String(updatedInvoice.id)
-        });
-      }
+        const actualGrandTotal = finalGrandTotal !== undefined ? finalGrandTotal : parseFloat(String(updatedInvoice.grand_total || '0').replace(/[^\d.]/g, ''));
+        const actualCustomerId = customerId !== undefined ? customerId : updatedInvoice.customer_id;
+        const actualCustomerName = customerName !== undefined ? customerName : updatedInvoice.customer_name;
+        const actualDate = date ? new Date(date) : updatedInvoice.invoice_date;
 
-      // 2. If it's a Vendor Inward, ALSO create the Vendor Credit
-      if (effectiveInwardId) {
-        const inward = await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } });
+        const entriesToCreate: any[] = [];
+        const inward = effectiveInwardId ? await tx.inwardEntry.findUnique({ where: { id: String(effectiveInwardId) } }) : null;
+
+        // 1. Logic for Vendor Invoices (Payables)
         if (inward && inward.party_type === 'vendor' && inward.vendor_id) {
           const vendLastEntry = await (tx.ledgerEntry as any).findFirst({
             where: {
@@ -677,7 +717,8 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             orderBy: { created_at: 'desc' }
           });
           const vendLastBal = vendLastEntry ? (vendLastEntry.balance || 0) : 0;
-          const vendNewBal = vendLastBal + actualGrandTotal;
+          const vendLastNum = parseFloat(String(vendLastBal)) || 0;
+          const vendNewBal = vendLastNum + actualGrandTotal;
 
           entriesToCreate.push({
             id: crypto.randomUUID(),
@@ -694,18 +735,47 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             description: `Job Work Charge (Updated) (Inward: ${inward.inward_no}): Invoice ${updatedInvoice.invoice_no || updatedInvoice.id}`,
             reference_id: String(updatedInvoice.id)
           });
+        } 
+        // 2. Logic for Customer Invoices (Receivables)
+        else if (actualCustomerId && actualGrandTotal > 0) {
+          const custLastEntry = await (tx.ledgerEntry as any).findFirst({
+            where: {
+              party_id: String(actualCustomerId),
+              company_id: finalCompanyId ? String(finalCompanyId) : undefined
+            },
+            orderBy: { created_at: 'desc' }
+          });
+          const custLastBal = custLastEntry ? (custLastEntry.balance || 0) : 0;
+          const custLastNum = parseFloat(String(custLastBal)) || 0;
+          const custNewBal = custLastNum + actualGrandTotal;
+
+          entriesToCreate.push({
+            id: crypto.randomUUID(),
+            party_id: String(actualCustomerId),
+            party_name: actualCustomerName || 'Unknown Customer',
+            party_type: 'customer',
+            company_id: finalCompanyId ? String(finalCompanyId) : null,
+            date: actualDate ? new Date(actualDate) : new Date(),
+            vch_type: 'INVOICE',
+            vch_no: String(updatedInvoice.invoice_no || updatedInvoice.id),
+            type: 'debit',
+            amount: actualGrandTotal,
+            balance: custNewBal,
+            description: `Sales Invoice (Updated): ${updatedInvoice.invoice_no || updatedInvoice.id}`,
+            reference_id: String(updatedInvoice.id)
+          });
         }
-      }
 
-      for (const entryData of entriesToCreate) {
-        await (tx.ledgerEntry as any).create({ data: entryData });
-      }
+        for (const entryData of entriesToCreate) {
+          await (tx.ledgerEntry as any).create({ data: entryData });
+        }
 
-      return updatedInvoice;
-    }, {
-      maxWait: 15000,
-      timeout: 45000
-    });
+        return updatedInvoice;
+      }, {
+        maxWait: 15000,
+        timeout: 45000
+      });
+    }, 3, 2000);
 
     // Logging Audit
     await logAudit({
