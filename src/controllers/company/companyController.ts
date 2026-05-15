@@ -64,6 +64,8 @@ export const getCompanyById = async (req: Request, res: Response) => {
 export const getAllCompanies = async (req: Request, res: Response) => {
   try {
     const companies = await prisma.company.findMany();
+    // Prevent browser/CDN caching so deleted companies disappear immediately
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json(companies.map(mapCompany));
   } catch (error: any) {
     console.error('CRITICAL ERROR in getAllCompanies:', error);
@@ -170,9 +172,35 @@ export const updateCompany = async (req: Request, res: Response) => {
 export const deleteCompany = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    await prisma.company.delete({ where: { id: String(id) } });
+    // Nullify all related FK references first (schema lacks onDelete:Cascade)
+    // Without this, MySQL FK constraint blocks the delete and company persists in dropdown
+    await prisma.$transaction(async (tx) => {
+      // Unlink users from this company
+      await (tx.user as any).updateMany({
+        where: { company_id: String(id) },
+        data: { company_id: null }
+      });
+      // Unlink leads
+      await (tx.lead as any).updateMany({
+        where: { company_id: String(id) },
+        data: { company_id: null }
+      });
+      // Unlink deals
+      await (tx.deal as any).updateMany({
+        where: { company_id: String(id) },
+        data: { company_id: null }
+      });
+      // Delete invoice reminders linked to this company (has onDelete:Cascade but explicit is safer)
+      await (tx.invoiceReminder as any).deleteMany({
+        where: { companyId: String(id) }
+      });
+      // Finally delete the company
+      await tx.company.delete({ where: { id: String(id) } });
+    });
     res.json({ message: 'Company deleted successfully' });
   } catch (error: any) {
+    console.error('❌ COMPANY DELETE ERROR:', error);
     res.status(500).json({ error: 'Failed to delete company', detail: error.message });
   }
 };
+
