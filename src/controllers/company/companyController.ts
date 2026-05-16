@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import prisma from '../../config/prisma';
+import { withRetry } from '../../utils/retry';
 import crypto from 'crypto';
 
 const mapCompany = (company: any) => {
@@ -49,9 +50,9 @@ const mapCompany = (company: any) => {
 export const getCompanyById = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const company = await prisma.company.findUnique({
+    const company = await withRetry(() => prisma.company.findUnique({
       where: { id: String(id) }
-    });
+    }));
     
     if (!company) return res.status(404).json({ error: 'Company not found' });
 
@@ -63,7 +64,7 @@ export const getCompanyById = async (req: Request, res: Response) => {
 
 export const getAllCompanies = async (req: Request, res: Response) => {
   try {
-    const companies = await prisma.company.findMany();
+    const companies = await withRetry(() => prisma.company.findMany());
     // Prevent browser/CDN caching so deleted companies disappear immediately
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
     res.json(companies.map(mapCompany));
@@ -84,7 +85,7 @@ export const createCompany = async (req: Request, res: Response) => {
   }
 
   try {
-    const company = await prisma.company.create({
+    const company = await withRetry(() => prisma.company.create({
       data: {
         id: crypto.randomUUID(),
         name,
@@ -95,7 +96,7 @@ export const createCompany = async (req: Request, res: Response) => {
         logo_secondary: logoSecondary || null,
         invoice_settings: JSON.stringify(invoiceSettings || null)
       } as any
-    });
+    }));
     res.status(201).json({ 
         ...company, 
         activeModules: activeModules || [],
@@ -158,10 +159,10 @@ export const updateCompany = async (req: Request, res: Response) => {
       if (invoiceSettings.declarationText) updateData.declaration_text = invoiceSettings.declarationText;
     }
 
-    const company = await prisma.company.update({
+    const company = await withRetry(() => prisma.company.update({
       where: { id: String(id) },
       data: updateData
-    });
+    }));
 
     res.json(mapCompany(company));
   } catch (error: any) {
@@ -174,7 +175,7 @@ export const deleteCompany = async (req: Request, res: Response) => {
   try {
     // Nullify all related FK references first (schema lacks onDelete:Cascade)
     // Without this, MySQL FK constraint blocks the delete and company persists in dropdown
-    await prisma.$transaction(async (tx) => {
+    await withRetry(() => prisma.$transaction(async (tx) => {
       // Unlink users from this company
       await (tx.user as any).updateMany({
         where: { company_id: String(id) },
@@ -196,7 +197,7 @@ export const deleteCompany = async (req: Request, res: Response) => {
       });
       // Finally delete the company
       await tx.company.delete({ where: { id: String(id) } });
-    });
+    }));
     res.json({ message: 'Company deleted successfully' });
   } catch (error: any) {
     console.error('❌ COMPANY DELETE ERROR:', error);

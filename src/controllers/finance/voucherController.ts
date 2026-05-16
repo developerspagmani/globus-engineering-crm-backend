@@ -75,7 +75,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
       where.AND.push({ party_id: String(partyId) });
     }
 
-    const [vouchers, totalCount, amountRows] = await Promise.all([
+    const [vouchers, totalCount, aggregateData] = await withRetry(() => Promise.all([
       prisma.voucher.findMany({
         where,
         skip,
@@ -83,19 +83,30 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         orderBy: { date: 'desc' }
       }),
       prisma.voucher.count({ where }),
-      (prisma.voucher as any).findMany({ where, select: { amount: true, tds_amount: true, others_amount: true } })
-    ]);
+      prisma.voucher.aggregate({
+        where,
+        _sum: {
+          amount: true,
+          tds_amount: true,
+          others_amount: true
+        }
+      })
+    ]));
 
-    const totalCollected = amountRows.reduce(
-      (sum: number, v: any) => sum + (parseFloat(String(v.amount || '0').replace(/[^\d.]/g, '')) || 0),
-      0
-    );
-
-    const totalTDS = amountRows.reduce((sum: number, v: any) => sum + (Number(v.tds_amount) || 0), 0);
-    const totalOthers = amountRows.reduce((sum: number, v: any) => sum + (Number(v.others_amount) || 0), 0);
+    const totalCollected = aggregateData._sum.amount || 0;
+    const totalTDS = aggregateData._sum.tds_amount || 0;
+    const totalOthers = aggregateData._sum.others_amount || 0;
 
     res.json({
-      items: vouchers.map((v: any) => ({ ...v, items: JSON.parse(v.items_json || '[]') })),
+      items: vouchers.map((v: any) => {
+        let items = [];
+        try {
+          items = JSON.parse(v.items_json || '[]');
+        } catch (e) {
+          console.error(`Malformed JSON in voucher ${v.id}`);
+        }
+        return { ...v, items };
+      }),
       pagination: {
         total: totalCount,
         page,
