@@ -53,6 +53,11 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     if (status && status !== 'all') {
       where.AND.push({ status: status });
     }
+    
+    const partyType = req.query.partyType as string;
+    if (partyType && partyType !== 'all') {
+      where.AND.push({ party_type: partyType });
+    }
 
     const [entries, totalCount, completedCount, pendingCount, partiesRaw] = await Promise.all([
       prisma.inwardEntry.findMany({
@@ -81,6 +86,11 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     });
     const outwards = await prisma.outwardEntry.findMany({
       where: { inward_id: { in: inwardIds } }
+    });
+
+    const outwardIds = outwards.map(o => String(o.id));
+    const allReturnedInwards = await prisma.inwardEntry.findMany({
+      where: { outward_id: { in: outwardIds } }
     });
 
     // Pre-group invoices and outwards
@@ -134,9 +144,9 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         });
 
         // 3. Find Inwards FROM Vendors that link to Outwards to Vendors linked to THIS Inward
-        const relatedVendorInwards = entries.filter((ei: any) => 
-          ei.party_type === 'vendor' && 
-          outwardsForThisEntry.some(ow => ow.id === ei.outward_id)
+        const relatedVendorInwards = allReturnedInwards.filter((ei: any) => 
+          ei.party_type === 'vendor' &&
+          outwardsForThisEntry.some(ow => String(ow.id) === String(ei.outward_id))
         );
 
         relatedVendorInwards.forEach((vi: any) => {
@@ -384,6 +394,11 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       }
     });
 
+    const outwardIds = relatedOutwards.map(o => String(o.id));
+    const allReturnedInwards = await prisma.inwardEntry.findMany({
+      where: { outward_id: { in: outwardIds } }
+    });
+
     // Pre-group for O(1) lookup
     const invoiceGroups = new Map<string, any[]>();
     relatedInvoices.forEach((inv: any) => {
@@ -432,9 +447,9 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         });
 
         // Find Vendor Returns
-        const vendorInwardsForThisCustomer = inwards.filter(i => 
+        const vendorInwardsForThisCustomer = allReturnedInwards.filter(i => 
            i.party_type === 'vendor' && 
-           outwardsForThisEntry.some(ow => ow.id === i.outward_id)
+           outwardsForThisEntry.some(ow => String(ow.id) === String(i.outward_id))
         );
 
         vendorInwardsForThisCustomer.forEach((vi: any) => {

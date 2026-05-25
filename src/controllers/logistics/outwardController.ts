@@ -41,6 +41,11 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const partyType = req.query.partyType as string;
+    if (partyType && partyType !== 'all') {
+      where.AND.push({ party_type: partyType });
+    }
+
     const [entries, totalCount] = await Promise.all([
       prisma.outwardEntry.findMany({
         where,

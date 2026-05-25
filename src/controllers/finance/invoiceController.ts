@@ -140,6 +140,28 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    // Party Type Filter
+    const partyType = req.query.partyType as string;
+    if (partyType && partyType !== 'all') {
+      const relatedInwards = await prisma.inwardEntry.findMany({
+        where: { party_type: partyType },
+        select: { id: true }
+      });
+      const inwardIds = relatedInwards.map(i => i.id);
+      
+      if (partyType === 'vendor') {
+         filteredWhere.AND.push({ inward_id: { in: inwardIds } });
+      } else if (partyType === 'customer') {
+         filteredWhere.AND.push({
+           OR: [
+             { inward_id: { in: inwardIds } },
+             { inward_id: null },
+             { inward_id: '' }
+           ]
+         });
+      }
+    }
+
     // Specific Invoice Selection Filter (Support both ID and Invoice No selection)
     if (rawInvoiceNos) {
       const parts = rawInvoiceNos.split(',').map(n => n.trim()).filter(n => n !== '');
@@ -454,6 +476,16 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                         vehicle_no: vehicleNo || vehicle_no || existingChallan.vehicle_no || 'N/A'
                     }
                 });
+
+                // Update the legacyInvoice's delivery_no to match the existing challan
+                const matched = String(existingChallan.challan_no || '').match(/\d+/);
+                const actualChallanNo = matched ? parseInt(matched[0]) : null;
+                if (actualChallanNo) {
+                    await (tx as any).legacyInvoice.update({
+                        where: { id: newInvoice.id },
+                        data: { delivery_no: actualChallanNo }
+                    });
+                }
             } else {
                 await tx.challan.create({
                     data: {
@@ -473,6 +505,13 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                         inward_id: String(inwardId),
                         inward_no: String(inward_no || dc_no || dcNo || 'N/A')
                     }
+                });
+
+                // Update the legacyInvoice's delivery_no to match the newly generated challan
+                const actualChallanNo = newInvoice.invoice_no || newInvoice.id;
+                await (tx as any).legacyInvoice.update({
+                    where: { id: newInvoice.id },
+                    data: { delivery_no: actualChallanNo }
                 });
             }
         }
