@@ -2,13 +2,24 @@
 
 This document lists all the tables and SQL queries required to migrate data from the legacy system to the new Globus CRM structure.
 
+> [!WARNING]
+> **Important Constraint & Data Integrity Checks:**
+> Based on database analysis:
+> 1. There are **42 invoices** in `tbl_invoice` with `NULL` or empty `customer_id` / `customer_name`. Since target tables like `app_ledger_entries` require non-null customer keys (`party_id`, `party_name`), direct un-sanitized migration will fail. SQL queries below have been updated to filter out these invalid rows.
+> 2. There are **2 price fixing records** in `tbl_item_price_fixing` referencing legacy customer IDs that do not exist. Inner Joins are used to automatically skip these orphans.
+> 3. **Ledger Policy Mismatch:** The Express backend (`migrationController.ts`) implements a **Voucher-Only Ledger Policy** where invoices (debits) are *not* logged as ledger entries. If you run both debit (4.1) and credit (4.2 & 4.3) queries, it will create a standard double-entry ledger. Choose the configuration that matches your accounting needs.
+
+---
+
 ## 1. Company Setup
 Ensure the company exists before running migrations.
 ```sql
 INSERT INTO app_companies (id, name, slug, plan) 
 VALUES ('comp_globus', 'Globus Engineering', 'globus-engineering', 'enterprise')
-ON DUPLICATE KEY UPDATE name = name;
+ON DUPLICATE KEY UPDATE name = VALUES(name); -- MySQL 8.0+ Alias: ON DUPLICATE KEY UPDATE name = name;
 ```
+
+---
 
 ## 2. Core Tables Migration
 
@@ -64,6 +75,7 @@ ON DUPLICATE KEY UPDATE process_name = VALUES(process_name);
 ```
 
 ### 2.6 Vendors (Migrate to App Table)
+*Note: `CAST(land_line AS CHAR)` is used to prevent implicit type mismatch errors with numeric landlines.*
 ```sql
 INSERT INTO app_vendors (id, name, company_id, status, city, phone, created_at)
 SELECT 
@@ -72,7 +84,7 @@ SELECT
     'comp_globus', 
     'active', 
     city, 
-    COALESCE(NULLIF(phone_number1, ''), COALESCE(NULLIF(land_line, ''), '')),
+    COALESCE(NULLIF(phone_number1, ''), COALESCE(NULLIF(CAST(land_line AS CHAR), ''), '')),
     NOW()
 FROM tbl_vendor 
 WHERE customer_name IS NOT NULL AND customer_name != ''
@@ -80,17 +92,18 @@ ON DUPLICATE KEY UPDATE name = VALUES(name);
 ```
 
 ### 2.7 Price Fixings (Migrate to App Table)
+*Note: `COALESCE` is used on all target non-nullable columns to prevent constraint failures due to potential null fields in source columns.*
 ```sql
 INSERT INTO app_price_fixings (id, customer_id, customer_name, item_id, item_name, process_id, process_name, price, company_id, created_at)
 SELECT 
     CONCAT('price_', pf.id),
     CAST(pf.customer_id AS CHAR),
-    c.customer_name,
+    COALESCE(c.customer_name, 'Unknown Customer'),
     CONCAT('item_', pf.item_id),
-    i.item,
+    COALESCE(i.item, 'Unknown Item'),
     CONCAT('proc_', pf.process_id),
-    p.process,
-    pf.price,
+    COALESCE(p.process, 'Standard'),
+    COALESCE(pf.price, 0),
     'comp_globus',
     NOW()
 FROM tbl_item_price_fixing pf
@@ -100,19 +113,24 @@ JOIN tbl_process p ON pf.process_id = p.id
 ON DUPLICATE KEY UPDATE price = VALUES(price);
 ```
 
+---
+
 ## 3. Complex Migrations (Inwards)
 
 ### 3.1 Inward Entries
 The inward entries require joining multiple tables and formatting items as JSON.
 ```sql
--- Note: This is handled via backend logic in migrationController.ts 
--- to correctly construct the JSON items from tbl_inward_item.
+-- Note: This is handled via backend logic in migrationController.ts (migrateLegacyData)
+-- to correctly construct the JSON items from tbl_inward_item and link reference IDs.
 ```
+
+---
 
 ## 4. Financial Synchronization
 
-### 4.1 Ledger Entries (Invoices)
-Creates debit entries for all invoices.
+### 4.1 Ledger Entries (Invoices - Debit)
+> [!NOTE]
+> Run this query ONLY if you want standard double-entry ledger logging. If you wish to match the application backend's **Voucher-Only** policy, skip this query.
 ```sql
 INSERT INTO app_ledger_entries (id, party_id, party_name, party_type, company_id, date, vch_type, vch_no, type, amount, balance, description, reference_id, created_at)
 SELECT 
@@ -125,12 +143,15 @@ SELECT
     'INVOICE',
     CAST(COALESCE(invoice_no, id) AS CHAR),
     'debit',
-    CAST(REPLACE(REPLACE(grand_total, ',', ''), ' ', '') AS DECIMAL(15,2)),
-    0, -- Balance is calculated sequentially in app
+    COALESCE(CAST(REPLACE(REPLACE(grand_total, ',', ''), ' ', '') AS DECIMAL(15,2)), 0.00),
+    0.00, -- Balance is calculated sequentially in app
     CONCAT('Migrated Invoice: ', COALESCE(invoice_no, id)),
     CAST(id AS CHAR),
     COALESCE(app_created_at, NOW())
-FROM tbl_invoice;
+FROM tbl_invoice
+WHERE customer_id IS NOT NULL 
+  AND customer_name IS NOT NULL 
+  AND customer_name != '';
 ```
 
 ### 4.2 Vouchers (Payments)
@@ -146,14 +167,43 @@ SELECT
     customer_name,
     'customer',
     'comp_globus',
-    CAST(REPLACE(REPLACE(paid_amount, ',', ''), ' ', '') AS DECIMAL(15,2)),
+    COALESCE(CAST(REPLACE(REPLACE(paid_amount, ',', ''), ' ', '') AS DECIMAL(15,2)), 0.00),
     CASE WHEN cheque_no IS NOT NULL AND cheque_no != '' THEN 'cheque' ELSE 'cash' END,
     CAST(COALESCE(invoice_no, id) AS CHAR),
     'posted',
     COALESCE(app_created_at, NOW())
 FROM tbl_invoice
-WHERE CAST(REPLACE(REPLACE(paid_amount, ',', ''), ' ', '') AS DECIMAL(15,2)) > 0;
+WHERE customer_id IS NOT NULL 
+  AND customer_name IS NOT NULL 
+  AND customer_name != ''
+  AND COALESCE(CAST(REPLACE(REPLACE(paid_amount, ',', ''), ' ', '') AS DECIMAL(15,2)), 0.00) > 0;
 ```
+
+### 4.3 Ledger Entries (Receipts - Credit)
+Creates ledger credit entries matching the Vouchers created in 4.2.
+```sql
+INSERT INTO app_ledger_entries (id, party_id, party_name, party_type, company_id, date, vch_type, vch_no, type, amount, balance, description, reference_id, created_at)
+SELECT 
+    UUID(),
+    party_id,
+    party_name,
+    party_type,
+    company_id,
+    date,
+    'RECEIPT',
+    voucher_no,
+    'credit',
+    amount,
+    0.00, -- Balance is calculated sequentially in app
+    CONCAT('Migrated Receipt for Inv: ', reference_no),
+    id, -- Links to the newly created Voucher ID
+    created_at
+FROM app_vouchers
+WHERE voucher_no LIKE 'M-VCH-%' 
+  AND company_id = 'comp_globus';
+```
+
+---
 
 ## 5. Table Mappings & Unused Tables
 
@@ -167,10 +217,10 @@ WHERE CAST(REPLACE(REPLACE(paid_amount, ',', ''), ' ', '') AS DECIMAL(15,2)) > 0
 | `tbl_vendor` | `app_vendors` | Insert New |
 | `tbl_inward` | `app_inward_entries` | Insert New (JSON items) |
 | `tbl_item_price_fixing` | `app_price_fixings` | Insert New |
-| N/A | `app_ledger_entries` | Generated from Invoices |
+| N/A | `app_ledger_entries` | Generated from Invoices / Vouchers |
 | N/A | `app_vouchers` | Generated from Invoices |
 
-### 5.1 Unused or Unrelated Tables (Likely from other projects)
+### 5.1 Unused or Unrelated Tables
 The following tables exist in the database but are not part of the CRM migration:
 -- banner (banner_id, banner_background, image1, image2)
 -- daily_plan (daily_plan, country_id, island_id, per_day_amount, image, popular_dive_destination)
