@@ -143,8 +143,16 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     // Party Type Filter
     const partyType = req.query.partyType as string;
     if (partyType && partyType !== 'all') {
+      const partyWhereCondition = partyType === 'customer' ? {
+        OR: [
+          { party_type: 'customer' },
+          { party_type: null },
+          { party_type: '' }
+        ]
+      } : { party_type: partyType };
+
       const relatedInwards = await prisma.inwardEntry.findMany({
-        where: { party_type: partyType },
+        where: partyWhereCondition,
         select: { id: true }
       });
       const inwardIds = relatedInwards.map(i => i.id);

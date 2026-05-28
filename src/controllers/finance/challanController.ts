@@ -33,8 +33,19 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
       where.AND.push({ inward_id: String(req.query.inward_id) });
     }
 
-    if (req.query.partyType && req.query.partyType !== 'all') {
-      where.AND.push({ party_type: String(req.query.partyType) });
+    const partyType = req.query.partyType as string;
+    if (partyType && partyType !== 'all') {
+      if (partyType === 'customer') {
+        where.AND.push({
+          OR: [
+            { party_type: 'customer' },
+            { party_type: null },
+            { party_type: '' }
+          ]
+        });
+      } else {
+        where.AND.push({ party_type: partyType });
+      }
     }
 
     if (search) {

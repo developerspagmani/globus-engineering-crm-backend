@@ -34,7 +34,17 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
 
     const partyType = req.query.partyType as string;
     if (partyType && partyType !== 'all') {
-      where.AND.push({ party_type: String(partyType) });
+      if (partyType === 'customer') {
+        where.AND.push({
+          OR: [
+            { party_type: 'customer' },
+            { party_type: null },
+            { party_type: '' }
+          ]
+        });
+      } else {
+        where.AND.push({ party_type: partyType });
+      }
     }
 
     // 1. Calculate Opening Balance if dateFrom is provided

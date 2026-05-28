@@ -43,7 +43,17 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
 
     const partyType = req.query.partyType as string;
     if (partyType && partyType !== 'all') {
-      where.AND.push({ party_type: partyType });
+      if (partyType === 'customer') {
+        where.AND.push({
+          OR: [
+            { party_type: 'customer' },
+            { party_type: null },
+            { party_type: '' }
+          ]
+        });
+      } else {
+        where.AND.push({ party_type: partyType });
+      }
     }
 
     const [entries, totalCount] = await Promise.all([
