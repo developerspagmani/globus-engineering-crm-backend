@@ -239,3 +239,4 @@ The following tables exist in the database but are not part of the CRM migration
 -- tbl_social_links (id, name, fa_icon_name, links)
 -- user (user_id, password, user_type, email, logged_in, last_login, first_name, middle_name, last_name, emp_no) -- Note: Legacy User table
 -- tbl_item_1 (id, item, item_code) -- Old version of tbl_item
+
