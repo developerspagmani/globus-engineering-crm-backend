@@ -339,8 +339,18 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
   const finalCompanyId = rawCompanyId ? String(rawCompanyId).toLowerCase() : null;
 
   try {
-    const invNo = invoiceNumber ? parseInt(String(invoiceNumber).replace(/\D/g, '')) : null;
-    const delNo = req.body.challanNumber ? parseInt(String(req.body.challanNumber).replace(/\D/g, '')) : null;
+    // Ensure invoice and DC (delivery challan) generate in different series based on billType
+    const isWOP = billType === 'Without Process'; // Pure DC/Challan
+    const isWP = billType === 'With Process';    // Pure Invoice
+
+    const invNo = (!isWOP && invoiceNumber) 
+      ? parseInt(String(invoiceNumber).replace(/\D/g, '')) 
+      : null;
+      
+    const delNo = (!isWP && req.body.challanNumber) 
+      ? parseInt(String(req.body.challanNumber).replace(/\D/g, '')) 
+      : null;
+
 
     if (invNo) {
       const existingInv = await (prisma as any).legacyInvoice.findFirst({
@@ -494,11 +504,13 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                         data: { delivery_no: actualChallanNo }
                     });
                 }
-            } else {
+            } else if (billType !== 'With Process') {
+                // Only create a new Challan if it's not a pure Invoice
+                const challanNumVal = delNo || invNo || newInvoice.id;
                 await tx.challan.create({
                     data: {
                         id: `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-                        challan_no: `DC-${newInvoice.invoice_no || newInvoice.id}`,
+                        challan_no: `DC-${challanNumVal}`,
                         party_id: String(customerId || ''),
                         party_name: String(customerName || 'N/A'),
                         party_type: 'customer',
@@ -516,11 +528,12 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                 });
 
                 // Update the legacyInvoice's delivery_no to match the newly generated challan
-                const actualChallanNo = newInvoice.invoice_no || newInvoice.id;
-                await (tx as any).legacyInvoice.update({
-                    where: { id: newInvoice.id },
-                    data: { delivery_no: actualChallanNo }
-                });
+                if (delNo) {
+                    await (tx as any).legacyInvoice.update({
+                        where: { id: newInvoice.id },
+                        data: { delivery_no: delNo }
+                    });
+                }
             }
         }
 
@@ -884,19 +897,50 @@ export const getNextNumbers = async (req: AuthRequest, res: Response) => {
 
   try {
     const lastInv = await (prisma as any).legacyInvoice.findFirst({
-      where: { company_id: String(companyId) },
+      where: { 
+        company_id: String(companyId),
+        invoice_no: { not: null }
+      },
       orderBy: { invoice_no: 'desc' }
     });
     const lastDel = await (prisma as any).legacyInvoice.findFirst({
-      where: { company_id: String(companyId) },
+      where: { 
+        company_id: String(companyId),
+        delivery_no: { not: null }
+      },
       orderBy: { delivery_no: 'desc' }
     });
 
+    const company = await prisma.company.findUnique({
+      where: { id: String(companyId) }
+    });
+
+    let configNextInvoice = 1;
+    let configNextChallan = 1;
+
+    if (company && company.invoice_settings) {
+      try {
+        const settings = JSON.parse(company.invoice_settings);
+        if (settings.nextNumber) {
+          configNextInvoice = parseInt(settings.nextNumber) || 1;
+        }
+        if (settings.nextChallanNumber) {
+          configNextChallan = parseInt(settings.nextChallanNumber) || 1;
+        }
+      } catch (e) {
+        // ignore JSON parsing errors
+      }
+    }
+
+    const dbNextInvoice = (lastInv?.invoice_no || 0) + 1;
+    const dbNextChallan = (lastDel?.delivery_no || 0) + 1;
+
     res.json({
-      nextInvoice: (lastInv?.invoice_no || 0) + 1,
-      nextChallan: (lastDel?.delivery_no || 0) + 1
+      nextInvoice: Math.max(dbNextInvoice, configNextInvoice),
+      nextChallan: Math.max(dbNextChallan, configNextChallan)
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to get next numbers', detail: error.message });
   }
 };
+
