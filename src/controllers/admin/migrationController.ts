@@ -29,18 +29,16 @@ export const migrateLegacyData = async (req: Request, res: Response) => {
     console.log(`✅ Core: ${results.customers} Cust, ${results.invoices} Inv`);
 
     // 3. Migrate Items in bulk
+    console.log('📦 Migrating legacy items...');
     const legacyItems = await (prisma as any).tbl_item.findMany();
-    const existingItems = await prisma.item.findMany({ where: { company_id: companyId }, select: { item_name: true } });
-    const existingNames = new Set(existingItems.map(i => i.item_name));
+    await prisma.item.deleteMany({ where: { company_id: companyId } });
 
-    const itemsToCreate = legacyItems
-      .filter((l: any) => l.item && !existingNames.has(l.item))
-      .map((l: any) => ({
-        id: `item_${l.id}`,
-        item_code: l.item_code || `ITM-${l.id}`,
-        item_name: l.item,
-        company_id: companyId
-      }));
+    const itemsToCreate = legacyItems.map((l: any) => ({
+      id: `item_${l.id}`,
+      item_code: l.item_code || `ITM-${l.id}`,
+      item_name: l.item || 'Unnamed Item',
+      company_id: companyId
+    }));
 
     if (itemsToCreate.length > 0) {
       await prisma.item.createMany({ data: itemsToCreate, skipDuplicates: true });

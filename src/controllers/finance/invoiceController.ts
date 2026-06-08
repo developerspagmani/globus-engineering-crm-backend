@@ -190,6 +190,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     const [invoices, totalCount, sums] = await Promise.all([
       prisma.legacyInvoice.findMany({
         where: filteredWhere,
+        include: { customer: true },
         skip,
         take: limit,
         orderBy: [{ invoice_date: 'desc' }, { id: 'desc' }]

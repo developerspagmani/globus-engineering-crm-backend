@@ -69,6 +69,11 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const countWhere = {
+      ...where,
+      AND: (where.AND || []).filter((cond: any) => cond.status === undefined)
+    };
+
     const [entries, totalCount, completedCount, pendingCount, partiesRaw] = await Promise.all([
       prisma.inwardEntry.findMany({
         where,
@@ -80,8 +85,8 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         ]
       }),
       prisma.inwardEntry.count({ where }),
-      prisma.inwardEntry.count({ where: { ...where, AND: [...(where.AND || []), { status: 'completed' }] } }),
-      prisma.inwardEntry.count({ where: { ...where, AND: [...(where.AND || []), { status: 'pending' }] } }),
+      prisma.inwardEntry.count({ where: { ...countWhere, AND: [...countWhere.AND, { status: 'completed' }] } }),
+      prisma.inwardEntry.count({ where: { ...countWhere, AND: [...countWhere.AND, { status: 'pending' }] } }),
       prisma.inwardEntry.findMany({
         where,
         select: { customer_name: true, vendor_name: true },
@@ -215,9 +220,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     });
 
     const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
-    const finalEntries = isInvoiceScreen 
-      ? parsedEntries.filter((e: any) => e.items.some((it: any) => it.billingBalance > 0))
-      : parsedEntries;
+    const finalEntries = parsedEntries;
 
     res.json({
       items: finalEntries,
@@ -493,9 +496,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       });
 
       const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
-      const hasBalance = isInvoiceScreen
-        ? balanceItems.some((item: any) => item.billingBalance > 0)
-        : balanceItems.some((item: any) => item.remainingQty > 0);
+      const hasBalance = true;
       // console.log(`[DIAGNOSTIC] Inward #${entry.inward_no}: hasBalance=${hasBalance}, Items=${balanceItems.length}`);
 
       return {
