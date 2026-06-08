@@ -2,6 +2,46 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
+import nodemailer from 'nodemailer';
+
+async function sendVisitNotification(leadEmail: string, leadName: string, companyName: string, visitDate: Date) {
+  if (!process.env.SMTP_HOST) {
+    console.error('SMTP_HOST not defined, skipping visit notification email.');
+    return;
+  }
+  
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: process.env.SMTP_PORT === '465',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
+  const subject = `Upcoming Visit Scheduled - Globus Engineering`;
+  const body = `Dear ${leadName},
+
+This is to kindly inform you that a representative from Globus Engineering is scheduled to visit your company, ${companyName || 'your office'}, on ${visitDate.toLocaleDateString()}.
+
+We look forward to meeting with you to discuss how we can support your engineering needs. If you need to reschedule, please let us know.
+
+Best regards,
+Globus Engineering Team`;
+
+  try {
+    await transporter.sendMail({
+      from: `"${process.env.FROM_NAME || 'Globus Engineering'}" <${process.env.FROM_EMAIL || 'noreply@globusengineering.com'}>`,
+      to: 'rdhanushkumarramalingam@gmail.com', // HARDCODED FOR TESTING
+      subject,
+      text: body
+    });
+    console.log(`✅ Visit notification sent to rdhanushkumarramalingam@gmail.com (Original: ${leadEmail})`);
+  } catch (err) {
+    console.error('❌ Failed to send lead visit email:', err);
+  }
+}
 
 export const getAllLeads = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = req.query.companyId as string;
@@ -134,6 +174,11 @@ export const createLead = async (req: AuthRequest, res: Response) => {
     };
 
     res.status(201).json(mappedLead);
+
+    // Send email notification if next_visit_date is set and email is provided
+    if (mappedLead.nextVisitDate && mappedLead.email) {
+      sendVisitNotification(mappedLead.email, mappedLead.name, mappedLead.company || '', mappedLead.nextVisitDate).catch(console.error);
+    }
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to create lead', detail: error.message });
   }
@@ -149,6 +194,15 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
   if (phone !== undefined && !phone) return res.status(400).json({ error: 'Phone number is mandatory' });
 
   try {
+    // Check existing lead to see if next_visit_date is changing
+    const existingLead = await prisma.lead.findUnique({ where: { id } });
+
+    const newNextVisitDate = next_visit_date ? new Date(next_visit_date) : null;
+    const isDateChanged = existingLead && (
+      (!existingLead.next_visit_date && newNextVisitDate) ||
+      (existingLead.next_visit_date && newNextVisitDate && existingLead.next_visit_date.getTime() !== newNextVisitDate.getTime())
+    );
+
     const lead = await prisma.lead.update({
       where: { id },
       data: { 
@@ -162,7 +216,7 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
         notes,
         assigned_area,
         product_interest,
-        next_visit_date: next_visit_date ? new Date(next_visit_date) : null
+        next_visit_date: newNextVisitDate
       }
     });
 
@@ -177,6 +231,11 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     };
 
     res.json(mappedLead);
+
+    // Send email notification if next_visit_date is newly set or changed
+    if (isDateChanged && mappedLead.nextVisitDate && mappedLead.email) {
+      sendVisitNotification(mappedLead.email, mappedLead.name, mappedLead.company || '', mappedLead.nextVisitDate).catch(console.error);
+    }
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update lead', detail: error.message });
   }
