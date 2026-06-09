@@ -101,7 +101,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
                   let grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
                   if (grand <= 0 && taxable > 0) grand = taxable + taxVal;
                   const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
-                  return (grand - paid) > 0.5;
+                  return (grand - paid) > 0.5 || inv.status === 'BILLED';
               })
               .map(inv => inv.id);
       } else if (statusType === 'paid') {

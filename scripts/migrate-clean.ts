@@ -93,6 +93,8 @@ async function main() {
     // 4. Migrate raw invoices to app_invoices
     console.log('📦 Migrating legacy invoices to app_invoices...');
     const rawInvoices = await (prisma as any).tblInvoice.findMany();
+    const custNameMapForInv = new Map(rawCustomers.map((c: any) => [c.id, c.customer_name]));
+
     const invoicesToCreate = rawInvoices.map((inv: any) => ({
       ...inv,
       company_id: companyId,
@@ -100,6 +102,7 @@ async function main() {
       sub_total: inv.sub_total || null,
       tax_total: inv.tax_total || null,
       tax_rate: inv.tax_rate || 12,
+      customer_name: inv.customer_name || custNameMapForInv.get(inv.customer_id) || 'Unknown Customer',
       items_json: null // will be populated in step 9
     }));
 
@@ -156,10 +159,37 @@ async function main() {
       .map((l: any) => ({
         id: `vend_${l.id}`,
         name: l.customer_name,
+        email_: l.email_id1 || null,
+        phone: l.phone_number1 || null,
+        company: l.customer_name,
         company_id: companyId,
         status: 'active',
-        city: l.city || '',
-        phone: l.phone_number1 || l.phone || ''
+        area: l.area || null,
+        city: l.city || null,
+        contact_person1: l.contact_person1 || null,
+        contact_person2: l.contact_person2 || null,
+        contact_person3: l.contact_person3 || null,
+        cst: l.cst || null,
+        designation1: l.designation1 || null,
+        designation2: l.designation2 || null,
+        designation3: l.designation3 || null,
+        email_id1: l.email_id1 || null,
+        email_id2: l.email_id2 || null,
+        email_id3: l.email_id3 || null,
+        fax: l.fax || null,
+        gst: l.gst || null,
+        landline: l.land_line ? String(l.land_line) : null,
+        phone_number1: l.phone_number1 || null,
+        phone_number2: l.phone_number2 || null,
+        phone_number3: l.phone_number3 || null,
+        pin_code: l.pin_code ? String(l.pin_code) : null,
+        state: l.state || null,
+        state_code: l.state_code || null,
+        street1: l.street1 || null,
+        street2: l.street2 || null,
+        tin: l.tin || null,
+        vendor_id: String(l.id),
+        vendor_name: l.customer_name
       }));
 
     if (vendorsToCreate.length > 0) {
@@ -376,17 +406,13 @@ async function main() {
       include: { customer: true }
     });
 
-    const activeCustomerIds = new Set(
-      (await prisma.legacyCustomer.findMany({ select: { id: true } })).map((c: any) => c.id)
-    );
-
     const customerBalances = new Map<number, number>();
     const ledgerEntriesToCreate = [];
     const vouchersToCreate = [];
 
     for (const inv of invoices) {
       const cId = inv.customer_id;
-      if (!cId || !activeCustomerIds.has(cId)) continue;
+      if (!cId) continue;
 
       const currentBalance = customerBalances.get(cId) || 0;
       const amount = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;

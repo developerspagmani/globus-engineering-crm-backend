@@ -39,37 +39,18 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
     const [invoices, customerCount, vendorCount, latestInvoices, latestInwards] = await Promise.all([
       prisma.legacyInvoice.findMany({
         where: companyWhere,
-        select: {
-          id: true,
-          total: true,
-          grand_total: true,
-          paid_amount: true,
-          status: true,
-          due_date: true,
-          invoice_date: true,
-          invoice_no: true,
-          customer_name: true,
-          sub_total: true,
-          tax_total: true
-        }
+        include: { customer: true }
       }),
       prisma.legacyCustomer.count({ where: companyWhere }),
       prisma.vendor.count({ where: companyWhere }),
       prisma.legacyInvoice.findMany({
         where: companyWhere,
+        include: { customer: true },
         orderBy: [
           { invoice_date: 'desc' },
           { id: 'desc' }
         ],
-        take: 10,
-        select: {
-          id: true,
-          invoice_no: true,
-          invoice_date: true,
-          customer_name: true,
-          grand_total: true,
-          status: true
-        }
+        take: 10
       }),
       prisma.inwardEntry.findMany({
         where: companyWhere,
@@ -125,7 +106,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
         pendingInvoices.push({
           id: inv.id,
           invoice_no: inv.invoice_no,
-          customer: inv.customer_name,
+          customer: inv.customer_name || inv.customer?.customer_name || 'Unknown Customer',
           amount: grand,
           pending: Math.max(0, grand - paid),
           due_date: dueDate
@@ -158,7 +139,14 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
         overdueCount
       },
       overdueInvoices,
-      latestInvoices,
+      latestInvoices: latestInvoices.map((inv: any) => ({
+        id: inv.id,
+        invoice_no: inv.invoice_no,
+        invoice_date: inv.invoice_date,
+        customer_name: inv.customer_name || inv.customer?.customer_name || 'Unknown Customer',
+        grand_total: inv.grand_total,
+        status: inv.status
+      })),
       latestInwards
     });
 
