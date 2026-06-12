@@ -1,4 +1,5 @@
 import express from 'express';
+// Force reload of remote database config
 import cors from 'cors';
 import dotenv from 'dotenv';
 import apiRoutes from './routes';

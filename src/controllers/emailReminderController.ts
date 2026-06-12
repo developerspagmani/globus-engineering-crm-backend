@@ -3,6 +3,13 @@ import prisma from '../config/prisma';
 import nodemailer from 'nodemailer';
 import { generateInvoicePDF } from '../utils/pdfGenerator';
 
+const cleanStr = (val: any): string => {
+  if (val === null || val === undefined) return '';
+  const str = String(val).trim();
+  if (str.toLowerCase() === 'null') return '';
+  return str;
+};
+
 
 // GET /api/invoices/:id/reminder-status - Get reminder status for an invoice
 export const getReminderStatus = async (req: Request, res: Response) => {
@@ -182,6 +189,26 @@ export const processEmailReminders = async (req: Request, res: Response) => {
           
           if (!customerEmail) continue;
           
+          const resolvedCustomerName = cleanStr(invoice.customer_name) || cleanStr(invoice.customer?.customer_name) || 'N/A';
+          
+          let resolvedCustomerAddress = cleanStr(invoice.address);
+          if (!resolvedCustomerAddress && invoice.customer) {
+            const parts = [
+              cleanStr(invoice.customer.street1),
+              cleanStr(invoice.customer.street2),
+              cleanStr(invoice.customer.city),
+              cleanStr(invoice.customer.state)
+            ].filter(Boolean);
+            if (invoice.customer.pin_code && String(invoice.customer.pin_code).toLowerCase() !== 'null') {
+              parts.push(String(invoice.customer.pin_code));
+            }
+            resolvedCustomerAddress = parts.join(', ');
+          }
+          if (!resolvedCustomerAddress) resolvedCustomerAddress = 'N/A';
+
+          const resolvedCustomerGst = cleanStr(invoice.gstin) || cleanStr(invoice.customer?.gst) || 'N/A';
+          const resolvedState = cleanStr(invoice.state) || cleanStr(invoice.customer?.state) || 'Tamilnadu';
+
           const pdfBuffer = await generateInvoicePDF({
             invoiceNumber: invoice.invoice_no?.toString() || 'N/A',
             invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : 'N/A',
@@ -189,17 +216,18 @@ export const processEmailReminders = async (req: Request, res: Response) => {
             dcDate: invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A',
             poNo: invoice.po_no || 'N/A',
             poDate: invoice.po_date ? new Date(invoice.po_date).toLocaleDateString() : 'N/A',
-            customerName: invoice.customer_name || 'N/A',
-            customerAddress: invoice.address || invoice.customer?.street1 || 'N/A',
-            customerGst: invoice.customer?.gst || 'N/A',
+            customerName: resolvedCustomerName,
+            customerAddress: resolvedCustomerAddress,
+            customerGst: resolvedCustomerGst,
             items: JSON.parse(invoice.items_json || '[]').map((it: any) => ({
               description: it.description || 'N/A',
-              quantity: it.quantity || 0,
-              price: it.unitPrice || 0,
-              amount: it.total || 0
+              quantity: Number(it.quantity || 0),
+              price: Number(it.unitPrice || 0),
+              amount: Number(it.amount || (Number(it.quantity || 0) * Number(it.unitPrice || 0)) || 0),
+              hsn: it.hsnCode || it.hsn || '84661010'
             })),
             subTotal: parseFloat(invoice.total || '0'),
-            taxTotal: Number(invoice.tax_total || 0),
+            taxTotal: invoice.tax_total !== null ? Number(invoice.tax_total) : (parseFloat(invoice.grand_total || '0') - parseFloat(invoice.total || '0')),
             grandTotal: parseFloat(invoice.grand_total || '0'),
             companyName: 'Globus Engineering Tools',
             companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
@@ -208,7 +236,10 @@ export const processEmailReminders = async (req: Request, res: Response) => {
               bankName: 'INDIAN OVERSEAS BANK',
               accNo: '170902000000962',
               ifsc: 'IOBA0001709'
-            }
+            },
+            taxRate: Number(invoice.tax_rate || 18),
+            state: resolvedState,
+            billType: invoice.bill_type || 'with_process'
           });
 
           const success = await sendEmail(
@@ -365,6 +396,26 @@ export const sendTestEmail8840 = async (req: Request, res: Response) => {
     console.log(`📧 Recipient: ${customerEmail}`);
     const emailContent = generateEmailContent(invoice);
     
+    const resolvedCustomerName = cleanStr(invoice.customer_name) || cleanStr(invoice.customer?.customer_name) || 'N/A';
+    
+    let resolvedCustomerAddress = cleanStr(invoice.address);
+    if (!resolvedCustomerAddress && invoice.customer) {
+      const parts = [
+        cleanStr(invoice.customer.street1),
+        cleanStr(invoice.customer.street2),
+        cleanStr(invoice.customer.city),
+        cleanStr(invoice.customer.state)
+      ].filter(Boolean);
+      if (invoice.customer.pin_code && String(invoice.customer.pin_code).toLowerCase() !== 'null') {
+        parts.push(String(invoice.customer.pin_code));
+      }
+      resolvedCustomerAddress = parts.join(', ');
+    }
+    if (!resolvedCustomerAddress) resolvedCustomerAddress = 'N/A';
+
+    const resolvedCustomerGst = cleanStr(invoice.gstin) || cleanStr(invoice.customer?.gst) || 'N/A';
+    const resolvedState = cleanStr(invoice.state) || cleanStr(invoice.customer?.state) || 'Tamilnadu';
+
     console.log('📄 Generating PDF...');
     const pdfBuffer = await generateInvoicePDF({
       invoiceNumber: invoice.invoice_no?.toString() || 'N/A',
@@ -373,18 +424,18 @@ export const sendTestEmail8840 = async (req: Request, res: Response) => {
       dcDate: invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A',
       poNo: invoice.po_no || 'N/A',
       poDate: invoice.po_date ? new Date(invoice.po_date).toLocaleDateString() : 'N/A',
-      customerName: invoice.customer_name || 'N/A',
-      customerAddress: invoice.address || invoice.customer?.street1 || 'N/A',
-      customerGst: invoice.customer?.gst || 'N/A',
+      customerName: resolvedCustomerName,
+      customerAddress: resolvedCustomerAddress,
+      customerGst: resolvedCustomerGst,
       items: JSON.parse(invoice.items_json || '[]').map((it: any) => ({
         description: it.description || 'N/A',
-        quantity: it.quantity || 0,
-        price: it.unitPrice || 0,
-        amount: it.total || 0,
-        hsn: it.hsn || '84661010'
+        quantity: Number(it.quantity || 0),
+        price: Number(it.unitPrice || 0),
+        amount: Number(it.amount || (Number(it.quantity || 0) * Number(it.unitPrice || 0)) || 0),
+        hsn: it.hsnCode || it.hsn || '84661010'
       })),
       subTotal: parseFloat(invoice.total || '0'),
-      taxTotal: Number(invoice.tax_total || 0),
+      taxTotal: invoice.tax_total !== null ? Number(invoice.tax_total) : (parseFloat(invoice.grand_total || '0') - parseFloat(invoice.total || '0')),
       grandTotal: parseFloat(invoice.grand_total || '0'),
       companyName: 'Globus Engineering Tools',
       companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
@@ -393,7 +444,10 @@ export const sendTestEmail8840 = async (req: Request, res: Response) => {
         bankName: 'INDIAN OVERSEAS BANK',
         accNo: '170902000000962',
         ifsc: 'IOBA0001709'
-      }
+      },
+      taxRate: Number(invoice.tax_rate || 18),
+      state: resolvedState,
+      billType: invoice.bill_type || 'with_process'
     });
     console.log('✅ PDF Generated');
 

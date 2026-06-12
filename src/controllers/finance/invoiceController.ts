@@ -376,6 +376,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       customer_name: customerName,
       address,
       total: String(subTotal || '0'),
+      sub_total: finalSubTotal,
       grand_total: String(grandTotal || '0'),
       items_json: JSON.stringify(items || []),
       bill_type: billType === 'With Process' ? 'with_process' :
@@ -683,6 +684,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             customer_name: customerName,
             address,
             total: subTotal ? String(subTotal) : undefined,
+            sub_total: finalSubTotal !== undefined ? finalSubTotal : undefined,
             grand_total: grandTotal ? String(grandTotal) : undefined,
             items_json: items ? JSON.stringify(items) : undefined,
             bill_type: billType === 'With Process' ? 'with_process' :

@@ -29,6 +29,9 @@ export interface InvoicePDFData {
     accNo: string;
     ifsc: string;
   };
+  taxRate?: number;
+  state?: string;
+  billType?: string;
 }
 
 export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
@@ -44,6 +47,15 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     const leftX = 40;
     const rightX = 555;
     const width = rightX - leftX;
+
+    // Determine invoice parameters
+    const billTypeClean = (data.billType || '').toLowerCase();
+    const isWOP = billTypeClean.includes('without') || billTypeClean === 'wop' || billTypeClean === 'without_process';
+    const targetState = data.state || 'Tamilnadu';
+    const isIntraState = targetState.toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+    const taxRate = data.taxRate || 18;
+    const recipientCode = targetState.toLowerCase().replace(/[^a-z]/g, '') === 'telangana' ? '36' : (isIntraState ? '33' : 'N/A');
+    const stateLabel = isIntraState ? 'TamilNadu-33' : `${targetState.charAt(0).toUpperCase() + targetState.slice(1)}-${recipientCode}`;
 
     // Helper for table rows
     const drawRowLine = (y: number) => {
@@ -91,10 +103,10 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
       if (x > leftX) doc.moveTo(x, y).lineTo(x, y + 15).stroke();
     };
 
-    drawCol(leftX, 'Invoice No', data.invoiceNumber, 130);
+    drawCol(leftX, isWOP ? 'Invoice WOP No' : 'Invoice No', data.invoiceNumber, 130);
     drawCol(leftX + 130, 'DC No', data.dcNo, 130);
     drawCol(leftX + 260, 'PO No', data.poNo, 130);
-    drawCol(leftX + 390, 'State', 'TamilNadu-33', 130);
+    drawCol(leftX + 390, 'State', stateLabel, 130);
 
     y += 15;
     drawRowLine(y);
@@ -108,7 +120,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
 
     // --- TAX INVOICE BAR ---
     doc.rect(leftX, y, width, 18).fillColor('#f0f0f0').fill();
-    doc.fillColor('black').font('Helvetica-Bold').fontSize(11).text('TAX INVOICE', leftX, y + 4, { align: 'center' });
+    doc.fillColor('black').font('Helvetica-Bold').fontSize(11).text(isWOP ? 'INVOICE WOP' : 'TAX INVOICE', leftX, y + 4, { align: 'center' });
     y += 18;
     drawRowLine(y);
 
@@ -143,8 +155,8 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     doc.text('GST No', leftX + width / 2 + 5, addrY + 36);
     doc.font('Helvetica-Bold').text(`: ${data.customerGst}`, leftX + width / 2 + 45, addrY + 36);
     doc.font('Helvetica').text('State', leftX + width / 2 + 5, addrY + 48);
-    doc.text(': TAMILNADU', leftX + width / 2 + 45, addrY + 48);
-    doc.text('Code : 33', leftX + width / 2 + 180, addrY + 48);
+    doc.text(`: ${targetState.toUpperCase()}`, leftX + width / 2 + 45, addrY + 48);
+    doc.text(`Code : ${recipientCode}`, leftX + width / 2 + 180, addrY + 48);
 
     y += 65;
     drawRowLine(y);
@@ -156,8 +168,10 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     doc.text('DESCRIPTION', leftX + 35, y + 5, { width: 230, align: 'center' });
     doc.text('HSN CODE', leftX + 265, y + 5, { width: 60, align: 'center' });
     doc.text('QTY', leftX + 325, y + 5, { width: 40, align: 'center' });
-    doc.text('PRICE', leftX + 365, y + 5, { width: 70, align: 'center' });
-    doc.text('AMOUNT (₹)', leftX + 435, y + 5, { width: 80, align: 'center' });
+    if (!isWOP) {
+      doc.text('PRICE', leftX + 365, y + 5, { width: 70, align: 'center' });
+      doc.text('AMOUNT (₹)', leftX + 435, y + 5, { width: 80, align: 'center' });
+    }
 
     y += 18;
     drawRowLine(y);
@@ -168,8 +182,10 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
       doc.moveTo(leftX + 35, y - 18).lineTo(leftX + 35, tableBottom).stroke();
       doc.moveTo(leftX + 265, y - 18).lineTo(leftX + 265, tableBottom).stroke();
       doc.moveTo(leftX + 325, y - 18).lineTo(leftX + 325, tableBottom).stroke();
-      doc.moveTo(leftX + 365, y - 18).lineTo(leftX + 365, tableBottom).stroke();
-      doc.moveTo(leftX + 435, y - 18).lineTo(leftX + 435, tableBottom + 75).stroke();
+      if (!isWOP) {
+        doc.moveTo(leftX + 365, y - 18).lineTo(leftX + 365, tableBottom).stroke();
+        doc.moveTo(leftX + 435, y - 18).lineTo(leftX + 435, tableBottom + 75).stroke();
+      }
     };
     drawColLines();
 
@@ -180,8 +196,10 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
       doc.text(item.description, leftX + 40, y + 4, { width: 220 });
       doc.text(item.hsn || '84661010', leftX + 265, y + 4, { width: 60, align: 'center' });
       doc.text(item.quantity.toString(), leftX + 325, y + 4, { width: 40, align: 'center' });
-      doc.text(item.price.toFixed(2), leftX + 365, y + 4, { width: 65, align: 'right' });
-      doc.text(item.amount.toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
+      if (!isWOP) {
+        doc.text((item.price || 0).toFixed(2), leftX + 365, y + 4, { width: 65, align: 'right' });
+        doc.text((item.amount || 0).toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
+      }
       y += 15;
       doc.moveTo(leftX, y).lineTo(rightX, y).stroke();
     });
@@ -190,55 +208,79 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     drawRowLine(y);
 
     // --- Totals ---
-    doc.rect(leftX, y, width, 18).fillColor('#f0f0f0').fill();
-    doc.fillColor('black').font('Helvetica-Bold').fontSize(10);
-    doc.text('Total (Taxable Value)', leftX + 5, y + 4, { width: 320, align: 'right' });
-    doc.text(data.items.reduce((sum, item) => sum + item.quantity, 0).toString(), leftX + 325, y + 4, { width: 40, align: 'center' });
-    doc.text(data.subTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 }), leftX + 435, y + 4, { width: 75, align: 'right' });
+    if (isWOP) {
+      // WOP Totals: Only Total Quantity
+      doc.rect(leftX, y, width, 18).fillColor('#f0f0f0').fill();
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(10);
+      doc.text('Total Quantity', leftX + 5, y + 4, { width: 320, align: 'right' });
+      doc.text(data.items.reduce((sum, item) => sum + item.quantity, 0).toString(), leftX + 325, y + 4, { width: 40, align: 'center' });
+      y += 18;
+      drawRowLine(y);
+    } else {
+      // WP / BOTH Totals
+      doc.rect(leftX, y, width, 18).fillColor('#f0f0f0').fill();
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(10);
+      doc.text('Total (Taxable Value)', leftX + 5, y + 4, { width: 320, align: 'right' });
+      doc.text(data.items.reduce((sum, item) => sum + item.quantity, 0).toString(), leftX + 325, y + 4, { width: 40, align: 'center' });
+      doc.text(data.subTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 }), leftX + 435, y + 4, { width: 75, align: 'right' });
 
-    y += 18;
-    drawRowLine(y);
-    doc.fontSize(9).text('CGST (9%)', leftX + 5, y + 4, { width: 430, align: 'right' });
-    doc.text((data.taxTotal / 2).toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
-    y += 15;
-    drawRowLine(y);
-    doc.text('SGST (9%)', leftX + 5, y + 4, { width: 430, align: 'right' });
-    doc.text((data.taxTotal / 2).toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
-    y += 15;
-    drawRowLine(y);
+      y += 18;
+      drawRowLine(y);
 
-    doc.rect(leftX, y, width, 24).fillColor('#f0f0f0').fill();
-    doc.fillColor('black').fontSize(13).text('GRAND TOTAL', leftX + 5, y + 6, { width: 430, align: 'right' });
-    doc.text(data.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 }), leftX + 435, y + 6, { width: 75, align: 'right' });
-    y += 24;
-    drawRowLine(y);
+      if (isIntraState) {
+        doc.fontSize(9).text(`CGST (${taxRate / 2}%)`, leftX + 5, y + 4, { width: 430, align: 'right' });
+        doc.text((data.taxTotal / 2).toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
+        y += 15;
+        drawRowLine(y);
+        doc.text(`SGST (${taxRate / 2}%)`, leftX + 5, y + 4, { width: 430, align: 'right' });
+        doc.text((data.taxTotal / 2).toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
+        y += 15;
+        drawRowLine(y);
+      } else {
+        doc.fontSize(9).text(`IGST (${taxRate}%)`, leftX + 5, y + 4, { width: 430, align: 'right' });
+        doc.text(data.taxTotal.toFixed(2), leftX + 435, y + 4, { width: 75, align: 'right' });
+        y += 15;
+        drawRowLine(y);
+      }
+
+      doc.rect(leftX, y, width, 24).fillColor('#f0f0f0').fill();
+      doc.fillColor('black').fontSize(13).text('GRAND TOTAL', leftX + 5, y + 6, { width: 430, align: 'right' });
+      doc.text(data.grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 }), leftX + 435, y + 6, { width: 75, align: 'right' });
+      y += 24;
+      drawRowLine(y);
+    }
 
     // --- Bottom Sections ---
-    y += 30;
-    doc.fontSize(10).font('Helvetica-Bold').text(`AMOUNT (IN WORDS) : ${numberToWords(data.grandTotal).toUpperCase()}`, leftX + 5, y);
-    y += 15;
-    drawRowLine(y);
+    if (!isWOP) {
+      y += 30;
+      doc.fontSize(10).font('Helvetica-Bold').text(`AMOUNT (IN WORDS) : ${numberToWords(data.grandTotal).toUpperCase()}`, leftX + 5, y);
+      y += 15;
+      drawRowLine(y);
 
-    doc.rect(leftX, y, width / 2, 15).fillColor('#f0f0f0').fill();
-    doc.rect(leftX + width / 2, y, width / 2, 15).fillColor('#f0f0f0').fill();
-    doc.fillColor('black').fontSize(9).text('Company Details', leftX, y + 3, { width: width / 2, align: 'center' });
-    doc.text('Bank Details', leftX + width / 2, y + 3, { width: width / 2, align: 'center' });
-    y += 15;
-    drawRowLine(y);
+      doc.rect(leftX, y, width / 2, 15).fillColor('#f0f0f0').fill();
+      doc.rect(leftX + width / 2, y, width / 2, 15).fillColor('#f0f0f0').fill();
+      doc.fillColor('black').fontSize(9).text('Company Details', leftX, y + 3, { width: width / 2, align: 'center' });
+      doc.text('Bank Details', leftX + width / 2, y + 3, { width: width / 2, align: 'center' });
+      y += 15;
+      drawRowLine(y);
 
-    const footerY = y + 5;
-    doc.fontSize(8);
-    doc.font('Helvetica').text('VAT TIN', leftX + 5, footerY); doc.text(': 33132028969', leftX + 45, footerY);
-    doc.text('CST NO', leftX + 5, footerY + 10); doc.text(': 1091562', leftX + 45, footerY + 10);
-    doc.text('PAN NO', leftX + 5, footerY + 20); doc.text(': AAIFG6568K', leftX + 45, footerY + 20);
+      const footerY = y + 5;
+      doc.fontSize(8);
+      doc.font('Helvetica').text('VAT TIN', leftX + 5, footerY); doc.text(': 33132028969', leftX + 45, footerY);
+      doc.text('CST NO', leftX + 5, footerY + 10); doc.text(': 1091562', leftX + 45, footerY + 10);
+      doc.text('PAN NO', leftX + 5, footerY + 20); doc.text(': AAIFG6568K', leftX + 45, footerY + 20);
 
-    doc.moveTo(leftX + width / 2, y).lineTo(leftX + width / 2, y + 40).stroke();
-    doc.text('Bank', leftX + width / 2 + 5, footerY); doc.font('Helvetica-Bold').text(`: ${data.bankDetails.bankName}`, leftX + width / 2 + 45, footerY);
-    doc.font('Helvetica').text('A/C No', leftX + width / 2 + 5, footerY + 10); doc.font('Helvetica-Bold').text(`: ${data.bankDetails.accNo}`, leftX + width / 2 + 45, footerY + 10);
-    doc.font('Helvetica').text('IFSC', leftX + width / 2 + 5, footerY + 20); doc.font('Helvetica-Bold').text(`: ${data.bankDetails.ifsc}`, leftX + width / 2 + 45, footerY + 20);
+      doc.moveTo(leftX + width / 2, y).lineTo(leftX + width / 2, y + 40).stroke();
+      doc.text('Bank', leftX + width / 2 + 5, footerY); doc.font('Helvetica-Bold').text(`: ${data.bankDetails.bankName}`, leftX + width / 2 + 45, footerY);
+      doc.font('Helvetica').text('A/C No', leftX + width / 2 + 5, footerY + 10); doc.font('Helvetica-Bold').text(`: ${data.bankDetails.accNo}`, leftX + width / 2 + 45, footerY + 10);
+      doc.font('Helvetica').text('IFSC', leftX + width / 2 + 5, footerY + 20); doc.font('Helvetica-Bold').text(`: ${data.bankDetails.ifsc}`, leftX + width / 2 + 45, footerY + 20);
 
-    y += 40;
-    drawRowLine(y);
+      y += 40;
+      drawRowLine(y);
+    } else {
+      y += 30; // spacer for WOP signs
+    }
+
     doc.fontSize(10).font('Helvetica-Bold').text('Receivers Sign :', leftX + 5, y + 5);
     doc.text(`FOR ${(data.companyName || '').toUpperCase()}`, leftX + width / 2, y + 5, { width: width / 2, align: 'center' });
 
