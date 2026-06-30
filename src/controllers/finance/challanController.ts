@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
+import { generateNextSequence } from '../../utils/sequenceGenerator';
 
 export const getAllChallans = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
@@ -100,9 +101,10 @@ export const createChallan = async (req: AuthRequest, res: Response) => {
     const sanitizedCompanyId = finalCompanyId ? String(finalCompanyId).toLowerCase() : '';
 
     try {
+        const finalChallanNo = challan_no || await generateNextSequence('app_challans', 'challan_no', 'DC-');
         const challanData: any = {
             id: id ? String(id) : `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-            challan_no: String(challan_no || `DC-${Date.now()}`),
+            challan_no: finalChallanNo,
             party_id: party_id ? String(party_id) : null,
             party_name: String(party_name || 'N/A'),
             party_type: String(party_type || 'customer'),

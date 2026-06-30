@@ -64,10 +64,10 @@ export const createItem = async (req: Request, res: Response) => {
   try {
     const data = req.body;
     
-    // Validation for mandatory fields
-    if (!data.itemName || !data.itemCode) {
-      return res.status(400).json({ success: false, message: 'Item name and code are mandatory' });
-    }
+    // Validation for mandatory fields removed as per request
+    // if (!data.itemName || !data.itemCode) {
+    //   return res.status(400).json({ success: false, message: 'Item name and code are mandatory' });
+    // }
 
     const user: any = (req as any).user;
     
@@ -85,8 +85,8 @@ export const createItem = async (req: Request, res: Response) => {
     const item = await (prisma as any).item.create({
       data: {
         id: crypto.randomUUID(),
-        item_code: data.itemCode,
-        item_name: data.itemName,
+        item_code: data.itemCode || '',
+        item_name: data.itemName || '',
         company_id: finalCompanyId,
       },
     });
@@ -101,15 +101,15 @@ export const updateItem = async (req: Request, res: Response) => {
     const { id } = req.params;
     const data = req.body;
     
-    // Validation for mandatory fields if provided
-    if (data.itemName !== undefined && !data.itemName) return res.status(400).json({ success: false, message: 'Item name is mandatory' });
-    if (data.itemCode !== undefined && !data.itemCode) return res.status(400).json({ success: false, message: 'Item code is mandatory' });
+    // Validation for mandatory fields if provided removed as per request
+    // if (data.itemName !== undefined && !data.itemName) return res.status(400).json({ success: false, message: 'Item name is mandatory' });
+    // if (data.itemCode !== undefined && !data.itemCode) return res.status(400).json({ success: false, message: 'Item code is mandatory' });
 
     const item = await (prisma as any).item.update({
       where: { id },
       data: {
-        item_code: data.itemCode,
-        item_name: data.itemName,
+        item_code: data.itemCode !== undefined ? data.itemCode : undefined,
+        item_name: data.itemName !== undefined ? data.itemName : undefined,
       },
     });
     res.json({ success: true, data: item });

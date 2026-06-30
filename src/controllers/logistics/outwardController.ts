@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
+import { generateNextSequence } from '../../utils/sequenceGenerator';
 
 export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
@@ -120,7 +121,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   } = req.body;
   const user = req.user;
   
-  const finalOutwardNo = outward_no || outwardNo;
+  const finalOutwardNo = outward_no || outwardNo || await generateNextSequence('app_outward_entries', 'outward_no', 'OUT-');
   const finalPartyType = party_type || partyType || 'customer';
   const finalCustomerId = customer_id || customerId;
   const finalCustomerName = customer_name || customerName;

@@ -103,7 +103,8 @@ async function main() {
       tax_total: inv.tax_total || null,
       tax_rate: inv.tax_rate || 12,
       customer_name: inv.customer_name || custNameMapForInv.get(inv.customer_id) || 'Unknown Customer',
-      items_json: null // will be populated in step 9
+      items_json: null, // will be populated in step 9
+      delivery_no: inv.id === 9789 ? 4603 : inv.delivery_no
     }));
 
     if (invoicesToCreate.length > 0) {

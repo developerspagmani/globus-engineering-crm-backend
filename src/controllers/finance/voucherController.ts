@@ -4,6 +4,7 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import { logAudit } from '../../utils/auditLogger';
 import { withRetry } from '../../utils/retry';
 import crypto from 'crypto';
+import { generateNextSequence } from '../../utils/sequenceGenerator';
 
 export const getAllVouchers = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
@@ -144,6 +145,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
   try {
     const finalAmount = parseFloat(String(amount || '0'));
     const finalId = (id && id.trim() !== '') ? id : crypto.randomUUID();
+    const finalVoucherNo = voucher_no || await generateNextSequence('app_vouchers', 'voucher_no', 'VCH-');
 
     const result = await withRetry(async () => {
       return await prisma.$transaction(async (tx) => {
@@ -151,7 +153,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         const voucher = await (tx.voucher as any).create({
           data: {
             id: finalId,
-            voucher_no: voucher_no || `VCH-${Date.now()}`,
+            voucher_no: finalVoucherNo,
             date: date ? new Date(date) : new Date(),
             type: type || 'receipt',
             party_id: party_id ? String(party_id) : null,

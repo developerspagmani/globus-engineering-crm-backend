@@ -61,7 +61,7 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
               ]
             } : {},
             { date: { lt: new Date(dateFrom as string) } },
-            { vch_type: { notIn: ['INVOICE', 'OUTWARD'] } }
+            { vch_type: { notIn: ['OUTWARD'] } }
           ]
         }
       });
@@ -83,7 +83,7 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
     const entriesWhere: any = { 
       AND: [
         ...where.AND,
-        { vch_type: { notIn: ['INVOICE', 'OUTWARD'] } } // Only include voucher-based entries
+        { vch_type: { notIn: ['OUTWARD'] } }
       ] 
     };
     if (dateFrom) entriesWhere.AND.push({ date: { gte: new Date(dateFrom as string) } });

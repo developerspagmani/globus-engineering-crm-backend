@@ -239,12 +239,12 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       { totalTaxable: 0, totalGrand: 0, totalPaid: 0, totalTax: 0, totalOutstanding: 0, criticalOverdue: 0 }
     );
 
-    const parsedInvoices = invoices.map((inv: any) => {
+    const parsedInvoices = await Promise.all(invoices.map(async (inv: any) => {
       const base = { ...inv };
-      return {
+      const mapped = {
         ...base,
         id: inv.id.toString(),
-        invoiceNumber: inv.invoice_no?.toString() || inv.id.toString(),
+        invoiceNumber: (inv.invoice_no && inv.invoice_no !== 0) ? inv.invoice_no.toString() : (inv.dc_no || (inv.delivery_no ? `DC-${inv.delivery_no}` : inv.id.toString())),
         date: inv.invoice_date,
         dueDate: inv.due_date,
         customerId: inv.customer_id?.toString(),
@@ -280,7 +280,61 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         gst2_per: inv.gst2_per,
         igst_per: inv.igst_per
       };
-    });
+
+      if (rawInvoiceNos && mapped.inwardId) {
+         try {
+             const inward = await prisma.inwardEntry.findUnique({
+                 where: { id: mapped.inwardId }
+             });
+             
+             if (inward && inward.items_json) {
+                 const inwardItems = JSON.parse(inward.items_json);
+
+                 // Sum quantities from ALL OTHER invoices (exclude current invoice)
+                 const otherInvoices = await prisma.legacyInvoice.findMany({
+                     where: { inward_id: mapped.inwardId, id: { not: inv.id } }
+                 });
+                 
+                 const billedByOthers: Record<string, number> = {};
+                 otherInvoices.forEach(otherInv => {
+                     const otherItems = JSON.parse(otherInv.items_json || '[]');
+                     otherItems.forEach((oi: any) => {
+                         const itemName = String(oi.description || oi.item_name || '').toLowerCase().trim();
+                         if (!billedByOthers[itemName]) billedByOthers[itemName] = 0;
+                         billedByOthers[itemName] += (Number(oi.quantity || 0) + Number(oi.wopQty || 0));
+                     });
+                 });
+
+                 // Also track this invoice's OWN current quantities per item
+                 const myOwnQty: Record<string, number> = {};
+                 mapped.items.forEach((item: any) => {
+                     const itemName = String(item.description || item.item_name || '').toLowerCase().trim();
+                     myOwnQty[itemName] = (Number(item.quantity || 0) + Number(item.wopQty || 0));
+                 });
+                 
+                 mapped.items = mapped.items.map((item: any) => {
+                     const itemName = String(item.description || item.item_name || '').toLowerCase().trim();
+                     const originalItem = inwardItems.find((ii: any) => String(ii.description || ii.item_name || '').toLowerCase().trim() === itemName);
+                     
+                     if (originalItem) {
+                         const originalQty = Number(originalItem.quantity ?? originalItem.vendorWorkBalance ?? originalItem.billingBalance ?? originalItem.remainingQty ?? 0);
+                         const alreadyBilledByOthers = billedByOthers[itemName] || 0;
+                         const myCurrentQty = myOwnQty[itemName] || 0;
+                         // maxQty = remaining_pool (inward total - other invoices) 
+                         // The remaining_pool already includes our own qty since we excluded ourselves.
+                         // We explicitly compute: (inward total - others) to get total space available to this invoice.
+                         // This allows the user to increase from their current qty up to this max.
+                         item.maxQty = Math.max(myCurrentQty, originalQty - alreadyBilledByOthers);
+                     }
+                     return item;
+                 });
+             }
+         } catch (e) {
+             console.error("Failed to calculate maxQty", e);
+         }
+      }
+      return mapped;
+    }));
 
     // Compute aggregate totals for the CURRENT PAGE only
     const pageAggregates = parsedInvoices.reduce(
@@ -497,10 +551,16 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                     }
                 });
 
-                // Update the legacyInvoice's delivery_no to match the existing challan
+                // If the user explicitly provided a challanNumber, respect it and update the existing challan.
+                // Otherwise, update the legacyInvoice's delivery_no to match the existing challan
                 const matched = String(existingChallan.challan_no || '').match(/\d+/);
                 const actualChallanNo = matched ? parseInt(matched[0]) : null;
-                if (actualChallanNo) {
+                if (delNo) {
+                    await tx.challan.update({
+                        where: { id: existingChallan.id },
+                        data: { challan_no: `DC-${delNo}` }
+                    });
+                } else if (actualChallanNo) {
                     await (tx as any).legacyInvoice.update({
                         where: { id: newInvoice.id },
                         data: { delivery_no: actualChallanNo }
@@ -674,6 +734,46 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
         if (!oldInvoice) {
           throw new Error('Invoice not found');
         }
+
+        // --- SERVER-SIDE INWARD QUANTITY VALIDATION ---
+        const effectiveInwardIdForValidation = inwardId !== undefined ? inwardId : oldInvoice.inward_id;
+        if (effectiveInwardIdForValidation && items && Array.isArray(items)) {
+          const inwardForValidation = await tx.inwardEntry.findUnique({
+            where: { id: String(effectiveInwardIdForValidation) }
+          });
+          if (inwardForValidation && inwardForValidation.items_json) {
+            const inwardItemsForValidation = JSON.parse(inwardForValidation.items_json);
+            // Get billed qty from all OTHER invoices (exclude current being updated)
+            const otherInvsForValidation = await tx.legacyInvoice.findMany({
+              where: { inward_id: String(effectiveInwardIdForValidation), id: { not: invoiceIdNum } }
+            });
+            const billedByOthersValidation: Record<string, number> = {};
+            otherInvsForValidation.forEach((oi: any) => {
+              const oiItems = JSON.parse(oi.items_json || '[]');
+              oiItems.forEach((oiItem: any) => {
+                const n = String(oiItem.description || oiItem.item_name || '').toLowerCase().trim();
+                billedByOthersValidation[n] = (billedByOthersValidation[n] || 0) + (Number(oiItem.quantity || 0) + Number(oiItem.wopQty || 0));
+              });
+            });
+
+            for (const newItem of items) {
+              const itemName = String(newItem.description || newItem.item_name || '').toLowerCase().trim();
+              const originalInwardItem = inwardItemsForValidation.find((ii: any) =>
+                String(ii.description || ii.item_name || '').toLowerCase().trim() === itemName
+              );
+              if (originalInwardItem) {
+                const originalQty = Number(originalInwardItem.quantity ?? originalInwardItem.vendorWorkBalance ?? originalInwardItem.billingBalance ?? 0);
+                const alreadyBilledByOthers = billedByOthersValidation[itemName] || 0;
+                const maxAllowed = originalQty - alreadyBilledByOthers;
+                const newTotal = Number(newItem.quantity || 0) + Number(newItem.wopQty || 0);
+                if (newTotal > maxAllowed + 0.5) {
+                  throw new Error(`Quantity for "${newItem.description || itemName}" (${newTotal}) exceeds the maximum available balance (${maxAllowed}). Please reduce the quantity.`);
+                }
+              }
+            }
+          }
+        }
+        // --- END VALIDATION ---
 
         const updatedInvoice = await (tx as any).legacyInvoice.update({
           where: { id: invoiceIdNum },

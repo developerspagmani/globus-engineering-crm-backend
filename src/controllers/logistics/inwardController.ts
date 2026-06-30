@@ -2,6 +2,7 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
+import { generateNextSequence } from '../../utils/sequenceGenerator';
 
 export const getInwardEntries = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
@@ -251,6 +252,8 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
 
   try {
+    const finalInwardNo = inward_no || await generateNextSequence('app_inward_entries', 'inward_no', 'INW-');
+
     let attempts = 0;
     let entry;
     while (attempts < 3) {
@@ -258,7 +261,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
         entry = await prisma.inwardEntry.create({
           data: {
             id: crypto.randomUUID(),
-            inward_no,
+            inward_no: finalInwardNo,
             customer_id: String(customer_id || ''),
             customer_name,
             address,
@@ -496,7 +499,14 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       });
 
       const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
-      const hasBalance = true;
+      
+      let hasBalance = false;
+      if (isInvoiceScreen) {
+        hasBalance = balanceItems.some((item: any) => item.billingBalance > 0);
+      } else {
+        hasBalance = balanceItems.some((item: any) => item.remainingQty > 0);
+      }
+      
       // console.log(`[DIAGNOSTIC] Inward #${entry.inward_no}: hasBalance=${hasBalance}, Items=${balanceItems.length}`);
 
       return {
