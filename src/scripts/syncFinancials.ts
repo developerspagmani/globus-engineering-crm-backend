@@ -56,7 +56,7 @@ async function syncFinancials() {
           payment_mode: inv.cheque_no ? 'cheque' : 'cash',
           reference_no: String(inv.invoice_no || inv.id),
           cheque_no: inv.cheque_no || '',
-          description_: `Migrated Payment for Invoice ${inv.invoice_no || inv.id}`,
+          description_: `Payment for Invoice ${inv.invoice_no || inv.id}`,
           status: 'posted',
           created_at: inv.app_created_at || new Date()
         });
@@ -73,7 +73,7 @@ async function syncFinancials() {
           type: 'credit',
           amount: paidAmount,
           balance: finalBalance,
-          description: `Migrated Receipt for Inv: ${inv.invoice_no || inv.id}`,
+          description: `Receipt for Inv: ${inv.invoice_no || inv.id}`,
           reference_id: vchId,
           created_at: inv.app_created_at || new Date()
         });

@@ -284,7 +284,12 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
               type: entryType,
               amount: ledgerAmount,
               balance: newBalance,
-              description: `${type.toUpperCase()} - ${voucher.voucher_no || voucher.id}${currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : ''}${currentOthers > 0 ? ` (Others: ₹${currentOthers})` : ''}`,
+              description: (() => {
+                const modeLabel = payment_mode ? ` | ${String(payment_mode).toUpperCase()}` : '';
+                const tdsLabel = currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : '';
+                const othersLabel = currentOthers > 0 ? ` (Others: ₹${currentOthers})` : '';
+                return `${type.toUpperCase()} - ${voucher.voucher_no || voucher.id}${modeLabel}${tdsLabel}${othersLabel}`;
+              })(),
               reference_id: String(voucher.id)
             }
           });
@@ -430,7 +435,12 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
               type: entryType,
               amount: ledgerAmount,
               balance: newBalance,
-              description: `${type.toUpperCase()} - ${updatedVoucher.voucher_no || updatedVoucher.id} (Updated)${currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : ''}${currentOthers > 0 ? ` (Others: ₹${currentOthers})` : ''}`,
+              description: (() => {
+                const modeLabel = payment_mode ? ` | ${String(payment_mode).toUpperCase()}` : '';
+                const tdsLabel = currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : '';
+                const othersLabel = currentOthers > 0 ? ` (Others: ₹${currentOthers})` : '';
+                return `${type.toUpperCase()} - ${updatedVoucher.voucher_no || updatedVoucher.id}${modeLabel}${tdsLabel}${othersLabel}`;
+              })(),
               reference_id: String(updatedVoucher.id)
             }
           });

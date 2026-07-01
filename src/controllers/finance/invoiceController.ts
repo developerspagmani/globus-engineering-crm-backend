@@ -89,15 +89,16 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       
       const allInvoices = await prisma.legacyInvoice.findMany({
           where: baseWhere,
-          select: { id: true, total: true, grand_total: true, paid_amount: true, status: true, sub_total: true, tax_total: true }
+          select: { id: true, total: true, grand_total: true, paid_amount: true, status: true, sub_total: true, tax_total: true, bill_type: true }
       });
 
       let statusIds: number[] = [];
       if (statusType === 'pending') {
           statusIds = allInvoices
               .filter(inv => {
-                  const taxable = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
-                  const taxVal  = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+                  const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
+                  const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
+                  const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
                   let grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
                   if (grand <= 0 && taxable > 0) grand = taxable + taxVal;
                   const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
@@ -108,8 +109,9 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
           statusIds = allInvoices
               .filter(inv => {
                   if (inv.status === 'PAID' || inv.status === 'COMPLETED') return true;
-                  const taxable = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
-                  const taxVal  = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+                  const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
+                  const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
+                  const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
                   let grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
                   if (grand <= 0 && taxable > 0) grand = taxable + taxVal;
                   const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
@@ -207,10 +209,11 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     const aggregates = sums.reduce(
       (acc: any, inv: any) => {
         // Use Float columns if available, otherwise parse legacy String columns
-        const taxable = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
-        const taxVal  = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+        const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
+        const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
+        const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
         
-        let grand = inv.grand_total_float ?? (parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0);
+        let grand = isWop ? 0 : (inv.grand_total_float ?? (parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0));
         
         // Fallback: If grand_total is zero but we have taxable total, reconstruct the grand total
         if (grand <= 0 && taxable > 0) {
@@ -536,7 +539,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
             const currentItems = (items || []).map((it: any) => ({
                 description: it.description,
                 quantity: isWop ? 0 : Number(it.quantity || 0),
-                wopQty: isWop ? Number(it.quantity || 0) : Number(it.wopQty || 0),
+                wopQty: isWop ? (Number(it.wopQty) || Number(it.quantity) || 0) : Number(it.wopQty || 0),
                 unit: it.unit || 'pcs',
                 hsnCode: it.hsnCode || ''
             }));
