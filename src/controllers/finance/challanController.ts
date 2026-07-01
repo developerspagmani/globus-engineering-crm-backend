@@ -101,7 +101,7 @@ export const createChallan = async (req: AuthRequest, res: Response) => {
     const sanitizedCompanyId = finalCompanyId ? String(finalCompanyId).toLowerCase() : '';
 
     try {
-        const finalChallanNo = challan_no || await generateNextSequence('app_challans', 'challan_no', 'DC-');
+        const finalChallanNo = challan_no || await generateNextSequence('app_challans', 'challan_no', 'DC-', sanitizedCompanyId);
         const challanData: any = {
             id: id ? String(id) : `CHL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
             challan_no: finalChallanNo,

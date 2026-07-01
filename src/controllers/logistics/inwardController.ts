@@ -252,7 +252,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
 
   try {
-    const finalInwardNo = inward_no || await generateNextSequence('app_inward_entries', 'inward_no', 'INW-');
+    const finalInwardNo = inward_no || await generateNextSequence('app_inward_entries', 'inward_no', 'INW-', finalCompanyId);
 
     let attempts = 0;
     let entry;

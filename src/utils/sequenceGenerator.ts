@@ -13,11 +13,16 @@ const prisma = new PrismaClient();
 export async function generateNextSequence(
   tableName: string,
   fieldName: string,
-  defaultPrefix: string = ''
+  defaultPrefix: string = '',
+  companyId?: string | null
 ): Promise<string> {
   try {
     // Fetch all non-empty values of this field to find the highest number
-    const query = `SELECT ${fieldName} as doc_no FROM ${tableName} WHERE ${fieldName} IS NOT NULL AND ${fieldName} != ''`;
+    let query = `SELECT ${fieldName} as doc_no FROM ${tableName} WHERE ${fieldName} IS NOT NULL AND ${fieldName} != ''`;
+    if (companyId) {
+      const sanitizedCompanyId = String(companyId).replace(/'/g, "''");
+      query += ` AND company_id = '${sanitizedCompanyId}'`;
+    }
     const records = await prisma.$queryRawUnsafe<any[]>(query);
 
     let maxNum = 0;

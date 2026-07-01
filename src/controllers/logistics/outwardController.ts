@@ -120,15 +120,15 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
     inward_no, inwardNo
   } = req.body;
   const user = req.user;
+  const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : user?.company_id;
   
-  const finalOutwardNo = outward_no || outwardNo || await generateNextSequence('app_outward_entries', 'outward_no', 'OUT-');
+  const finalOutwardNo = outward_no || outwardNo || await generateNextSequence('app_outward_entries', 'outward_no', 'CH-', finalCompanyId);
   const finalPartyType = party_type || partyType || 'customer';
   const finalCustomerId = customer_id || customerId;
   const finalCustomerName = customer_name || customerName;
   const finalVendorId = vendor_id || vendorId;
   const finalVendorName = vendor_name || vendorName;
   const finalProcessName = process_name || processName;
-  const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : user?.company_id;
   const finalInwardId = inward_id || inwardId;
   const finalInwardNo = inward_no || inwardNo;
 
