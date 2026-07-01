@@ -285,10 +285,11 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
               amount: ledgerAmount,
               balance: newBalance,
               description: (() => {
-                const modeLabel = payment_mode ? ` | ${String(payment_mode).toUpperCase()}` : '';
+                const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
+                const ref = (cheque_no || reference_no) ? ` (No. ${cheque_no || reference_no})` : '';
                 const tdsLabel = currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : '';
                 const othersLabel = currentOthers > 0 ? ` (Others: ₹${currentOthers})` : '';
-                return `${type.toUpperCase()} - ${voucher.voucher_no || voucher.id}${modeLabel}${tdsLabel}${othersLabel}`;
+                return `${mode}${ref}${tdsLabel}${othersLabel}`;
               })(),
               reference_id: String(voucher.id)
             }
@@ -436,10 +437,11 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
               amount: ledgerAmount,
               balance: newBalance,
               description: (() => {
-                const modeLabel = payment_mode ? ` | ${String(payment_mode).toUpperCase()}` : '';
+                const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
+                const ref = (cheque_no || reference_no) ? ` (No. ${cheque_no || reference_no})` : '';
                 const tdsLabel = currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : '';
                 const othersLabel = currentOthers > 0 ? ` (Others: ₹${currentOthers})` : '';
-                return `${type.toUpperCase()} - ${updatedVoucher.voucher_no || updatedVoucher.id}${modeLabel}${tdsLabel}${othersLabel}`;
+                return `${mode}${ref}${tdsLabel}${othersLabel}`;
               })(),
               reference_id: String(updatedVoucher.id)
             }

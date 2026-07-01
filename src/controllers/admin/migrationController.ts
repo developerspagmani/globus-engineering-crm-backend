@@ -353,7 +353,7 @@ export const syncFinancials = async (req: Request, res: Response) => {
           type: 'credit',
           amount: paidAmount,
           balance: finalBalance,
-          description: `Receipt for Inv: ${inv.invoice_no || inv.id}`,
+          description: inv.cheque_no ? String(inv.cheque_no) : 'CASH',
           reference_id: vchId,
           created_at: inv.app_created_at || new Date()
         });

@@ -108,7 +108,7 @@ async function main() {
           type: 'credit',
           amount: paidAmount,
           balance: finalBalance,
-          description: `Migrated Receipt for Inv: ${inv.invoice_no || inv.id}`,
+          description: inv.cheque_no ? String(inv.cheque_no) : 'CASH',
           reference_id: vchId,
           created_at: inv.app_created_at || new Date()
         });
