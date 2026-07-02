@@ -69,11 +69,11 @@ model LegacyEmployee {
   password       String?   @db.VarChar(250)
   photo          String?   @db.VarChar(255)
   branch_no      Int?
-  company_id     String?   @db.VarChar(50)
-  app_status     String?   @default("active") @db.VarChar(50)
-  salary         Float?
-  joining_date   DateTime? @db.Date
   app_created_at DateTime? @default(now()) @db.Timestamp(0)
+  app_status     String?   @default("active") @db.VarChar(50)
+  company_id     String?   @db.VarChar(50)
+  joining_date   DateTime? @db.Date
+  salary         Float?
 
   @@map("tbl_employee")
 }
@@ -377,26 +377,26 @@ model Challan {
 }
 
 model Voucher {
-  id           String    @id @db.VarChar(50)
-  voucher_no   String    @db.VarChar(50)
-  date         DateTime? @db.Date
-  type         String?   @db.VarChar(50)
-  party_id     String?   @db.VarChar(50)
-  party_name   String?   @db.VarChar(255)
-  party_type   String?   @db.VarChar(50)
-  company_id   String?   @db.VarChar(50)
-  amount       Float?
-  payment_mode String?   @db.VarChar(50)
-  reference_no String?   @db.Text
-  description_ String?   @map("description?") @db.Text
-  status       String?   @db.VarChar(50)
-  created_at   DateTime? @default(now()) @db.Timestamp(0)
-  cheque_no    String?   @db.VarChar(50)
-  tds_amount   Float?    @default(0)
-  others_amount Float?   @default(0)
-  inward_id    String?   @db.VarChar(50)
-  inward_no    String?   @db.VarChar(50)
-  items_json   String?   @db.Text
+  id            String    @id @db.VarChar(50)
+  voucher_no    String    @db.VarChar(50)
+  date          DateTime? @db.Date
+  type          String?   @db.VarChar(50)
+  party_id      String?   @db.VarChar(50)
+  party_name    String?   @db.VarChar(255)
+  party_type    String?   @db.VarChar(50)
+  company_id    String?   @db.VarChar(50)
+  amount        Float?
+  payment_mode  String?   @db.VarChar(50)
+  reference_no  String?   @db.Text
+  description_  String?   @map("description?") @db.Text
+  status        String?   @db.VarChar(50)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  cheque_no     String?   @db.VarChar(50)
+  tds_amount    Float?    @default(0)
+  others_amount Float?    @default(0)
+  inward_id     String?   @db.VarChar(50)
+  inward_no     String?   @db.VarChar(50)
+  items_json    String?   @db.Text
 
   @@map("app_vouchers")
 }
@@ -695,89 +695,89 @@ model EmailLog {
 }
 
 model TblCustomer {
-  id              Int             @id @default(autoincrement())
-  customer_name   String?         @db.VarChar(200)
-  street1         String?         @db.VarChar(250)
-  street2         String?         @db.VarChar(250)
-  city            String?         @db.VarChar(150)
-  state           String?         @db.VarChar(230)
-  state_code      String?         @db.VarChar(15)
-  area            String?         @db.VarChar(150)
+  id              Int       @id @default(autoincrement())
+  customer_name   String?   @db.VarChar(200)
+  street1         String?   @db.VarChar(250)
+  street2         String?   @db.VarChar(250)
+  city            String?   @db.VarChar(150)
+  state           String?   @db.VarChar(230)
+  state_code      String?   @db.VarChar(15)
+  area            String?   @db.VarChar(150)
   pin_code        Int?
-  contact_person1 String?         @db.VarChar(200)
-  designation1    String?         @db.VarChar(200)
-  email_id1       String?         @db.VarChar(250)
-  phone_number1   String?         @db.VarChar(200)
-  contact_person2 String?         @db.VarChar(200)
-  designation2    String?         @db.VarChar(200)
-  email_id2       String?         @db.VarChar(200)
-  phone_number2   String?         @db.VarChar(200)
-  contact_person3 String?         @db.VarChar(200)
-  designation3    String?         @db.VarChar(200)
-  email_id3       String?         @db.VarChar(200)
-  phone_number3   String?         @db.VarChar(200)
+  contact_person1 String?   @db.VarChar(200)
+  designation1    String?   @db.VarChar(200)
+  email_id1       String?   @db.VarChar(250)
+  phone_number1   String?   @db.VarChar(200)
+  contact_person2 String?   @db.VarChar(200)
+  designation2    String?   @db.VarChar(200)
+  email_id2       String?   @db.VarChar(200)
+  phone_number2   String?   @db.VarChar(200)
+  contact_person3 String?   @db.VarChar(200)
+  designation3    String?   @db.VarChar(200)
+  email_id3       String?   @db.VarChar(200)
+  phone_number3   String?   @db.VarChar(200)
   land_line       Int?
-  gst             String?         @db.VarChar(50)
-  tin             String?         @db.VarChar(50)
-  cst             String?         @db.VarChar(50)
+  gst             String?   @db.VarChar(50)
+  tin             String?   @db.VarChar(50)
+  cst             String?   @db.VarChar(50)
   tc              Int?
   vmc             Int?
   hmc             Int?
-  payment_terms   String?         @db.VarChar(100)
-  customer_type   String?         @db.VarChar(100)
-  fax             String?         @db.VarChar(250)
-  email           String?         @db.VarChar(255)
-  phone           String?         @db.VarChar(50)
-  industry        String?         @db.VarChar(100)
-  status          String?         @default("active") @db.VarChar(50)
-  agent_id        String?         @db.VarChar(50)
-  company_id      String?         @db.VarChar(50)
-  app_created_at  DateTime?       @default(now()) @db.Timestamp(0)
-  district        String?         @db.VarChar(100)
+  payment_terms   String?   @db.VarChar(100)
+  customer_type   String?   @db.VarChar(100)
+  fax             String?   @db.VarChar(250)
+  agent_id        String?   @db.VarChar(50)
+  app_created_at  DateTime? @default(now()) @db.Timestamp(0)
+  company_id      String?   @db.VarChar(50)
+  district        String?   @db.VarChar(100)
+  email           String?   @db.VarChar(255)
+  industry        String?   @db.VarChar(100)
+  phone           String?   @db.VarChar(50)
+  status          String?   @default("active") @db.VarChar(50)
 
   @@map("tbl_customer")
 }
 
 model TblInvoice {
-  id             Int               @id @default(autoincrement())
-  invoice_date   DateTime?         @db.Date
+  id             Int       @id @default(autoincrement())
+  invoice_date   DateTime? @db.Date
   inward_no      Int?
-  dc_no          String?           @db.VarChar(200)
-  dc_date        DateTime?         @db.Date
-  po_no          String?           @db.VarChar(250)
-  po_date        DateTime?         @db.Date
+  dc_no          String?   @db.VarChar(200)
+  dc_date        DateTime? @db.Date
+  po_no          String?   @db.VarChar(250)
+  po_date        DateTime? @db.Date
   customer_id    Int?
-  total          String?           @db.VarChar(250)
-  discount       String?           @db.VarChar(250)
+  total          String?   @db.VarChar(250)
+  discount       String?   @db.VarChar(250)
   other_charges  Float?
-  gst1           String?           @db.VarChar(250)
-  gst2           String?           @db.VarChar(250)
-  igst           String?           @db.VarChar(250)
-  gst1_per       String?           @db.VarChar(250)
-  gst2_per       String?           @db.VarChar(250)
-  igst_per       String?           @db.VarChar(250)
-  state_det      String?           @db.VarChar(250)
-  grand_total    String?           @db.VarChar(250)
-  paid_amount    String?           @db.VarChar(250)
-  voucher_date   DateTime?         @db.Date
-  cheque_no      String?           @db.VarChar(250)
-  status         String?           @default("BILLED") @db.VarChar(30)
+  gst1           String?   @db.VarChar(250)
+  gst2           String?   @db.VarChar(250)
+  igst           String?   @db.VarChar(250)
+  gst1_per       String?   @db.VarChar(250)
+  gst2_per       String?   @db.VarChar(250)
+  igst_per       String?   @db.VarChar(250)
+  state_det      String?   @db.VarChar(250)
+  grand_total    String?   @db.VarChar(250)
+  paid_amount    String?   @db.VarChar(250)
+  voucher_date   DateTime? @db.Date
+  cheque_no      String?   @db.VarChar(250)
+  status         String?   @default("BILLED") @db.VarChar(30)
   invoice_no     Int?
   delivery_no    Int?
-  bill_type      String?           @db.VarChar(50)
-  company_id     String?           @db.VarChar(50)
-  app_created_at DateTime?         @default(now()) @db.Timestamp(0)
-  address        String?           @db.Text
-  customer_name  String?           @db.VarChar(255)
-  due_date       DateTime?         @db.Date
-  items_json     String?           @db.Text
+  bill_type      String?   @db.VarChar(50)
+  address        String?   @db.Text
+  app_created_at DateTime? @default(now()) @db.Timestamp(0)
+  company_id     String?   @db.VarChar(50)
+  customer_name  String?   @db.VarChar(255)
+  due_date       DateTime? @db.Date
+  gstin          String?   @db.VarChar(15)
+  inward_id      String?   @db.VarChar(50)
+  items_json     String?   @db.Text
+  notes          String?   @db.Text
+  state          String?   @db.VarChar(100)
   sub_total      Float?
+  tax_rate       Float?    @default(12)
   tax_total      Float?
-  inward_id      String?           @db.VarChar(50)
-  notes          String?           @db.Text
-  gstin          String?           @db.VarChar(15)
-  state          String?           @db.VarChar(100)
-  tax_rate       Float?            @default(12)
 
   @@map("tbl_invoice")
 }
