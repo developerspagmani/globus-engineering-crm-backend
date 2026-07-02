@@ -209,34 +209,65 @@ export const processEmailReminders = async (req: Request, res: Response) => {
           const resolvedCustomerGst = cleanStr(invoice.gstin) || cleanStr(invoice.customer?.gst) || 'N/A';
           const resolvedState = cleanStr(invoice.state) || cleanStr(invoice.customer?.state) || 'Tamilnadu';
 
+          // Fetch company details dynamically based on invoice.company_id
+          let companyObj = null;
+          if (invoice.company_id) {
+            companyObj = await prisma.company.findUnique({
+              where: { id: invoice.company_id }
+            });
+          }
+
+          // Parse company settings JSON for declaration settings
+          let showDeclaration = true;
+          let declarationText = undefined;
+          if (companyObj && companyObj.invoice_settings) {
+            try {
+              const parsedSettings = JSON.parse(companyObj.invoice_settings);
+              if (parsedSettings.showDeclaration !== undefined) {
+                showDeclaration = parsedSettings.showDeclaration;
+              }
+              if (parsedSettings.declarationText) {
+                declarationText = parsedSettings.declarationText;
+              }
+            } catch (err) {
+              console.error('Error parsing company invoice_settings:', err);
+            }
+          }
+
           const pdfBuffer = await generateInvoicePDF({
             invoiceNumber: invoice.invoice_no?.toString() || 'N/A',
-            invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : 'N/A',
+            invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toISOString() : 'N/A',
             dcNo: invoice.dc_no || 'N/A',
-            dcDate: invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A',
+            dcDate: invoice.dc_date ? new Date(invoice.dc_date).toISOString() : 'N/A',
             poNo: invoice.po_no || 'N/A',
-            poDate: invoice.po_date ? new Date(invoice.po_date).toLocaleDateString() : 'N/A',
+            poDate: invoice.po_date ? new Date(invoice.po_date).toISOString() : 'N/A',
             customerName: resolvedCustomerName,
             customerAddress: resolvedCustomerAddress,
             customerGst: resolvedCustomerGst,
             items: JSON.parse(invoice.items_json || '[]').map((it: any) => ({
               description: it.description || 'N/A',
-              quantity: Number(it.quantity || 0),
-              price: Number(it.unitPrice || 0),
-              amount: Number(it.amount || (Number(it.quantity || 0) * Number(it.unitPrice || 0)) || 0),
+              quantity: Number(it.qty !== undefined ? it.qty : (it.quantity || 0)),
+              price: Number(it.price !== undefined ? it.price : (it.unitPrice || 0)),
+              amount: Number(it.item_total !== undefined ? it.item_total : (it.amount || 0)),
               hsn: it.hsnCode || it.hsn || '84661010'
             })),
             subTotal: parseFloat(invoice.total || '0'),
             taxTotal: invoice.tax_total !== null ? Number(invoice.tax_total) : (parseFloat(invoice.grand_total || '0') - parseFloat(invoice.total || '0')),
             grandTotal: parseFloat(invoice.grand_total || '0'),
-            companyName: 'Globus Engineering Tools',
-            companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
-            companyGst: '33AAIFG6568K1ZZ',
-            bankDetails: {
-              bankName: 'INDIAN OVERSEAS BANK',
-              accNo: '170902000000962',
-              ifsc: 'IOBA0001709'
-            },
+            companyName: companyObj?.company_name || 'Globus Engineering Tools',
+            companySubHeader: companyObj?.company_sub_header || 'An ISO 9001: 2015 Certified Company',
+            companyAddress: companyObj?.company_address || 'No 24,Annaiyappan Street,S.S.Nagar, Nallampalayam,Ganapathy Post, Coimbatore-641006.',
+            companyGst: companyObj?.gst_no || '33AAIFG6568K1ZZ',
+            vatTin: companyObj?.vat_tin || '33132028969',
+            cstNo: companyObj?.cst_no || '1091562',
+            panNo: companyObj?.pan_no || 'AAIFG6568K',
+            bankName: companyObj?.bank_name || 'INDIAN OVERSEAS BANK',
+            bankAcc: companyObj?.bank_acc || '170902000000962',
+            bankBranchIfsc: companyObj?.bank_branch_ifsc || 'IOBA0001709',
+            showDeclaration: showDeclaration,
+            declarationText: declarationText,
+            logo: companyObj?.logo || undefined,
+            logoSecondary: companyObj?.logo_secondary || undefined,
             taxRate: Number(invoice.tax_rate || 18),
             state: resolvedState,
             billType: invoice.bill_type || 'with_process'
@@ -318,10 +349,13 @@ function isToday(date: Date) {
 }
 
 function generateEmailContent(invoice: any) {
+  const rawCustomerName = String(invoice.customer_name || '').trim();
+  const displayCustomerName = (!rawCustomerName || rawCustomerName.toLowerCase() === 'null') ? 'Sir' : rawCustomerName;
+
   return {
     subject: `Payment Reminder - Invoice #${invoice.invoice_no}`,
     body: `
-Dear ${invoice.customer_name},
+Dear ${displayCustomerName},
 
 This is a friendly reminder regarding your invoice #${invoice.invoice_no} for the amount of ₹${invoice.grand_total?.toLocaleString() || '0'}.
 
@@ -416,35 +450,66 @@ export const sendTestEmail8840 = async (req: Request, res: Response) => {
     const resolvedCustomerGst = cleanStr(invoice.gstin) || cleanStr(invoice.customer?.gst) || 'N/A';
     const resolvedState = cleanStr(invoice.state) || cleanStr(invoice.customer?.state) || 'Tamilnadu';
 
+    // Fetch company details dynamically based on invoice.company_id
+    let companyObj = null;
+    if (invoice.company_id) {
+      companyObj = await prisma.company.findUnique({
+        where: { id: invoice.company_id }
+      });
+    }
+
+    // Parse company settings JSON for declaration settings
+    let showDeclaration = true;
+    let declarationText = undefined;
+    if (companyObj && companyObj.invoice_settings) {
+      try {
+        const parsedSettings = JSON.parse(companyObj.invoice_settings);
+        if (parsedSettings.showDeclaration !== undefined) {
+          showDeclaration = parsedSettings.showDeclaration;
+        }
+        if (parsedSettings.declarationText) {
+          declarationText = parsedSettings.declarationText;
+        }
+      } catch (err) {
+        console.error('Error parsing company invoice_settings:', err);
+      }
+    }
+
     console.log('📄 Generating PDF...');
     const pdfBuffer = await generateInvoicePDF({
       invoiceNumber: invoice.invoice_no?.toString() || 'N/A',
-      invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toLocaleDateString() : 'N/A',
+      invoiceDate: invoice.invoice_date ? new Date(invoice.invoice_date).toISOString() : 'N/A',
       dcNo: invoice.dc_no || 'N/A',
-      dcDate: invoice.dc_date ? new Date(invoice.dc_date).toLocaleDateString() : 'N/A',
+      dcDate: invoice.dc_date ? new Date(invoice.dc_date).toISOString() : 'N/A',
       poNo: invoice.po_no || 'N/A',
-      poDate: invoice.po_date ? new Date(invoice.po_date).toLocaleDateString() : 'N/A',
+      poDate: invoice.po_date ? new Date(invoice.po_date).toISOString() : 'N/A',
       customerName: resolvedCustomerName,
       customerAddress: resolvedCustomerAddress,
       customerGst: resolvedCustomerGst,
       items: JSON.parse(invoice.items_json || '[]').map((it: any) => ({
         description: it.description || 'N/A',
-        quantity: Number(it.quantity || 0),
-        price: Number(it.unitPrice || 0),
-        amount: Number(it.amount || (Number(it.quantity || 0) * Number(it.unitPrice || 0)) || 0),
+        quantity: Number(it.qty !== undefined ? it.qty : (it.quantity || 0)),
+        price: Number(it.price !== undefined ? it.price : (it.unitPrice || 0)),
+        amount: Number(it.item_total !== undefined ? it.item_total : (it.amount || 0)),
         hsn: it.hsnCode || it.hsn || '84661010'
       })),
       subTotal: parseFloat(invoice.total || '0'),
       taxTotal: invoice.tax_total !== null ? Number(invoice.tax_total) : (parseFloat(invoice.grand_total || '0') - parseFloat(invoice.total || '0')),
       grandTotal: parseFloat(invoice.grand_total || '0'),
-      companyName: 'Globus Engineering Tools',
-      companyAddress: 'No:24, Annaiyappan Street, S.S.Nagar, Nallampalayam, Coimbatore - 641006',
-      companyGst: '33AAIFG6568K1ZZ',
-      bankDetails: {
-        bankName: 'INDIAN OVERSEAS BANK',
-        accNo: '170902000000962',
-        ifsc: 'IOBA0001709'
-      },
+      companyName: companyObj?.company_name || 'Globus Engineering Tools',
+      companySubHeader: companyObj?.company_sub_header || 'An ISO 9001: 2015 Certified Company',
+      companyAddress: companyObj?.company_address || 'No 24,Annaiyappan Street,S.S.Nagar, Nallampalayam,Ganapathy Post, Coimbatore-641006.',
+      companyGst: companyObj?.gst_no || '33AAIFG6568K1ZZ',
+      vatTin: companyObj?.vat_tin || '33132028969',
+      cstNo: companyObj?.cst_no || '1091562',
+      panNo: companyObj?.pan_no || 'AAIFG6568K',
+      bankName: companyObj?.bank_name || 'INDIAN OVERSEAS BANK',
+      bankAcc: companyObj?.bank_acc || '170902000000962',
+      bankBranchIfsc: companyObj?.bank_branch_ifsc || 'IOBA0001709',
+      showDeclaration: showDeclaration,
+      declarationText: declarationText,
+      logo: companyObj?.logo || undefined,
+      logoSecondary: companyObj?.logo_secondary || undefined,
       taxRate: Number(invoice.tax_rate || 18),
       state: resolvedState,
       billType: invoice.bill_type || 'with_process'
