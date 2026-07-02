@@ -41,6 +41,29 @@ export const getAllVendors = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const status = req.query.status as string;
+    if (status && status !== 'all') {
+      where.AND.push({ status: status });
+    }
+
+    const category = req.query.category as string;
+    if (category && category !== 'all') {
+      where.AND.push({ category: { contains: category } });
+    }
+
+    const fromDate = req.query.fromDate as string;
+    const toDate = req.query.toDate as string;
+    if (fromDate || toDate) {
+      const dateFilter: any = {};
+      if (fromDate) dateFilter.gte = new Date(fromDate);
+      if (toDate) {
+        const endOfDay = new Date(toDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        dateFilter.lte = endOfDay;
+      }
+      where.AND.push({ created_at: dateFilter });
+    }
+
     const [vendors, totalCount] = await Promise.all([
       prisma.vendor.findMany({
         where,

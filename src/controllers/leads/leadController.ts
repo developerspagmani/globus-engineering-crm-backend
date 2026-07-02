@@ -84,6 +84,24 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const status = req.query.status as string;
+    if (status && status !== 'all') {
+      where.AND.push({ status: status });
+    }
+
+    const fromDate = req.query.fromDate as string;
+    const toDate = req.query.toDate as string;
+    if (fromDate || toDate) {
+      const dateFilter: any = {};
+      if (fromDate) dateFilter.gte = new Date(fromDate);
+      if (toDate) {
+        const endOfDay = new Date(toDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        dateFilter.lte = endOfDay;
+      }
+      where.AND.push({ created_at: dateFilter });
+    }
+
     // Security: Sales users see leads in their assigned area OR leads they created themselves
     if (user?.role === 'sales') {
       const salesFilter: any = {

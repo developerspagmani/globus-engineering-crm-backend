@@ -91,6 +91,16 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const status = req.query.status as string;
+    if (status && status !== 'all') {
+      where.AND.push({ status: status });
+    }
+
+    const type = req.query.type as string;
+    if (type && type !== 'all') {
+      where.AND.push({ type: type });
+    }
+
     const [vouchers, totalCount, aggregateData] = await withRetry(() => Promise.all([
       prisma.voucher.findMany({
         where,

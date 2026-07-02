@@ -62,6 +62,34 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const status = req.query.status as string;
+    if (status && status !== 'all') {
+      where.AND.push({ status: status });
+    }
+
+    const type = req.query.type as string;
+    if (type && type !== 'all') {
+      where.AND.push({ type: type });
+    }
+
+    const bill_type = req.query.bill_type as string;
+    if (bill_type && bill_type !== 'all') {
+      where.AND.push({ bill_type: bill_type });
+    }
+
+    const fromDate = req.query.fromDate as string;
+    const toDate = req.query.toDate as string;
+    if (fromDate || toDate) {
+      const dateFilter: any = {};
+      if (fromDate) dateFilter.gte = new Date(fromDate);
+      if (toDate) {
+        const endOfDay = new Date(toDate);
+        endOfDay.setHours(23, 59, 59, 999);
+        dateFilter.lte = endOfDay;
+      }
+      where.AND.push({ date: dateFilter });
+    }
+
     const [challans, totalCount] = await Promise.all([
       prisma.challan.findMany({
         where,
