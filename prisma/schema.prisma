@@ -781,3 +781,25 @@ model TblInvoice {
 
   @@map("tbl_invoice")
 }
+
+model PurchaseBill {
+  id            String    @id @db.VarChar(50)
+  received_date DateTime  @db.Date
+  company_name  String    @db.VarChar(255)
+  gst_tin       String?   @db.VarChar(50)
+  dc_no         String?   @db.VarChar(100)
+  invoice_no    String    @db.VarChar(100)
+  sac           String?   @db.VarChar(50)
+  qty           Float     @default(0)
+  amount        Float     @default(0)
+  cgst          Float     @default(0)
+  sgst          Float     @default(0)
+  igst          Float     @default(0)
+  round_off     Float     @default(0)
+  grand_total   Float     @default(0)
+  company_id    String    @db.VarChar(50)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  vendor_id     String?   @db.VarChar(50)
+
+  @@map("app_purchase_bills")
+}

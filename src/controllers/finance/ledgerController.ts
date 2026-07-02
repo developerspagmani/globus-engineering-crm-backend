@@ -49,11 +49,11 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
 
     // 1. Calculate Opening Balance if dateFrom is provided
     let openingBalance = 0;
-    if (dateFrom && partyId) {
+    if (dateFrom) {
       const entriesBefore = await (prisma.ledgerEntry as any).findMany({
         where: {
           AND: [
-            { party_id: String(partyId) },
+            partyId ? { party_id: String(partyId) } : {},
             companyId ? {
               OR: [
                 { company_id: String(companyId) },

@@ -8,6 +8,7 @@ import * as challanController from '../controllers/finance/challanController';
 import * as gstController from '../controllers/finance/gstController';
 import * as statsController from '../controllers/finance/statsController';
 import * as auditController from '../controllers/system/auditController';
+import * as purchaseController from '../controllers/finance/purchaseController';
 import { checkPermission, authorize } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -212,5 +213,16 @@ router.get('/gst-lookup', gstController.getGstDetails);
  *   get: { summary: Get activity history, tags: [System] }
  */
 router.get('/audit-logs', checkPermission('mod_user_management', 'canRead') as any, auditController.getAuditLogs);
+
+/**
+ * @openapi
+ * /api/purchase-bills:
+ *   get: { summary: Get purchase bills, tags: [Finance] }
+ *   post: { summary: Create purchase bill, tags: [Finance] }
+ */
+router.get('/purchase-bills', checkPermission('mod_purchase_billing', 'canRead') as any, purchaseController.getAllPurchaseBills);
+router.post('/purchase-bills', checkPermission('mod_purchase_billing', 'canCreate') as any, purchaseController.createPurchaseBill);
+router.put('/purchase-bills/:id', checkPermission('mod_purchase_billing', 'canEdit') as any, purchaseController.updatePurchaseBill);
+router.delete('/purchase-bills/:id', checkPermission('mod_purchase_billing', 'canDelete') as any, purchaseController.deletePurchaseBill);
 
 export default router;
