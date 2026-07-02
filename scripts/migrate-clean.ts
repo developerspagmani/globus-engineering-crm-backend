@@ -67,6 +67,7 @@ async function main() {
       prisma.vendor.deleteMany({ where: { company_id: companyId } }),
       prisma.legacyCustomer.deleteMany({ where: { company_id: companyId } }),
       prisma.legacyInvoice.deleteMany({ where: { company_id: companyId } }),
+      prisma.purchaseBill.deleteMany({ where: { company_id: companyId } }),
     ]);
     console.log('✅ Existing records cleared.');
 
