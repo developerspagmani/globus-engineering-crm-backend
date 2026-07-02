@@ -129,6 +129,11 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
       return val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     };
 
+    // Format grand total function (rounded, no decimals)
+    const formatGrandTotal = (val: number) => {
+      return Math.round(val).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+    };
+
     // Render loop for pages
     pagesData.forEach((pageItems, pageIdx) => {
       const isLastPage = pageIdx === totalPages - 1;
@@ -408,7 +413,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
           doc.rect(leftX, y, width, 24).fillColor('#f0f0f0').fill();
           doc.fillColor('black').fontSize(11).font('Helvetica-Bold');
           doc.text('GRAND TOTAL', leftX + 5, y + 6, { width: 430, align: 'right' });
-          doc.text(formatCurrency(data.grandTotal), leftX + 440, y + 6, { width: 70, align: 'right' });
+          doc.text(formatGrandTotal(data.grandTotal), leftX + 440, y + 6, { width: 70, align: 'right' });
           y += 24;
           doc.moveTo(leftX, y).lineTo(rightX, y).stroke();
         }
@@ -417,7 +422,7 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
         if (!isWOP) {
           doc.fontSize(8.5).font('Helvetica');
           doc.text('Amount (in words) : ', leftX + 12, y + 4, { continued: true });
-          doc.font('Helvetica-Bold').text(numberToWords(data.grandTotal).toUpperCase());
+          doc.font('Helvetica-Bold').text(numberToWords(Math.round(data.grandTotal)).toUpperCase());
           y += 15;
           doc.moveTo(leftX, y).lineTo(rightX, y).stroke();
 

@@ -357,7 +357,7 @@ function generateEmailContent(invoice: any) {
     body: `
 Dear ${displayCustomerName},
 
-This is a friendly reminder regarding your invoice #${invoice.invoice_no} for the amount of ₹${invoice.grand_total?.toLocaleString() || '0'}.
+This is a friendly reminder regarding your invoice #${invoice.invoice_no} for the amount of Rs. ${Math.round(parseFloat(invoice.grand_total || '0')).toLocaleString('en-IN', { maximumFractionDigits: 0 })}.
 
 Delivery Details:
 - DC No: ${invoice.dc_no || 'N/A'}
