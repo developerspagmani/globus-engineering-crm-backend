@@ -644,3 +644,16 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch inward entry details', detail: error.message });
   }
 };
+
+export const generateDcNo = async (req: Request, res: Response) => {
+  try {
+    const finalCompanyId = req.query.companyId || (req as any).user?.company_id;
+    if (!finalCompanyId) {
+      return res.status(400).json({ error: 'Company ID is required' });
+    }
+    const dcNo = await generateNextSequence('app_inward_entries', 'dc_no', '', String(finalCompanyId));
+    res.json({ dcNo });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to generate DC No', detail: error.message });
+  }
+};

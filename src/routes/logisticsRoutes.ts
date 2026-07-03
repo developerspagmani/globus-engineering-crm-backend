@@ -19,6 +19,7 @@ const router = Router();
  *   get: { summary: Get pending outwards for vendor (Job Work), tags: [Logistics], parameters: [{ in: path, name: vendorId, required: true, schema: { type: string } }], responses: { 200: { description: List of pending outwards } } }
  */
 // Inward Entry
+router.get('/inward/sequence-dc', checkPermission('mod_inward', 'canCreate') as any, inwardController.generateDcNo);
 router.get('/inward', checkPermission('mod_inward', 'canRead') as any, inwardController.getInwardEntries);
 router.get('/inward/pending/:customerId', checkPermission('mod_inward', 'canRead') as any, inwardController.getPendingInwardsByCustomer);
 router.get('/inward/:id', checkPermission('mod_inward', 'canRead') as any, inwardController.getInwardById);
