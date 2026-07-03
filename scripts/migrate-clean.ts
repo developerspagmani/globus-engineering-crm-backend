@@ -66,6 +66,7 @@ async function main() {
       prisma.process.deleteMany({ where: { company_id: companyId } }),
       prisma.vendor.deleteMany({ where: { company_id: companyId } }),
       prisma.legacyCustomer.deleteMany({ where: { company_id: companyId } }),
+      prisma.invoiceReminder.deleteMany({ where: { companyId: companyId } }),
       prisma.legacyInvoice.deleteMany({ where: { company_id: companyId } }),
       prisma.purchaseBill.deleteMany({ where: { company_id: companyId } }),
     ]);
@@ -117,6 +118,25 @@ async function main() {
         });
       }
       console.log(`✅ Invoices migrated: ${invoicesToCreate.length}`);
+
+      console.log('📦 Creating default reminders for unpaid invoices...');
+      const remindersToCreate = invoicesToCreate
+        .filter((inv: any) => inv.status === 'BILLED')
+        .map((inv: any) => ({
+           invoiceId: inv.id,
+           companyId: companyId,
+           enabled: true
+        }));
+      
+      if(remindersToCreate.length > 0) {
+        for (let i = 0; i < remindersToCreate.length; i += chunk) {
+          await prisma.invoiceReminder.createMany({
+            data: remindersToCreate.slice(i, i + chunk),
+            skipDuplicates: true
+          });
+        }
+        console.log(`✅ Reminders created: ${remindersToCreate.length}`);
+      }
     }
 
     // 5. Migrate Items
