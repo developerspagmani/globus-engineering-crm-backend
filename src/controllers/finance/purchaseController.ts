@@ -80,7 +80,8 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
         roundOff: pb.round_off,
         grandTotal: pb.grand_total,
         company_id: pb.company_id,
-        vendorId: pb.vendor_id
+        vendorId: pb.vendor_id,
+        customerId: pb.customer_id
       })),
       pagination: {
         currentPage: page,
@@ -117,7 +118,8 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
     sgst,
     igst,
     roundOff,
-    vendorId
+    vendorId,
+    customerId
   } = req.body;
 
   if (!receivedDate || !companyName || !invoiceNo) {
@@ -153,7 +155,8 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
         round_off: cleanRoundOff,
         grand_total: cleanGrandTotal,
         company_id: String(companyId),
-        vendor_id: vendorId || null
+        vendor_id: vendorId || null,
+        customer_id: customerId || null
       }
     });
 
@@ -173,7 +176,8 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
       roundOff: newBill.round_off,
       grandTotal: newBill.grand_total,
       company_id: newBill.company_id,
-      vendorId: newBill.vendor_id
+      vendorId: newBill.vendor_id,
+      customerId: newBill.customer_id
     });
   } catch (err: any) {
     console.error('Error creating purchase bill:', err);
@@ -196,7 +200,8 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
     sgst,
     igst,
     roundOff,
-    vendorId
+    vendorId,
+    customerId
   } = req.body;
 
   try {
@@ -232,7 +237,8 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
         igst: cleanIgst,
         round_off: cleanRoundOff,
         grand_total: cleanGrandTotal,
-        vendor_id: vendorId !== undefined ? vendorId : existing.vendor_id
+        vendor_id: vendorId !== undefined ? vendorId : existing.vendor_id,
+        customer_id: customerId !== undefined ? customerId : existing.customer_id
       }
     });
 
