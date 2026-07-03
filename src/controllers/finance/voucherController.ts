@@ -155,7 +155,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
   try {
     const finalAmount = parseFloat(String(amount || '0'));
     const finalId = (id && id.trim() !== '') ? id : crypto.randomUUID();
-    const finalVoucherNo = voucher_no || await generateNextSequence('app_vouchers', 'voucher_no', 'VCH-', finalCompanyId);
+    const finalVoucherNo = voucher_no || await generateNextSequence('app_vouchers', 'voucher_no', '', finalCompanyId, 3001);
 
     const result = await withRetry(async () => {
       return await prisma.$transaction(async (tx) => {

@@ -142,7 +142,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   
   const finalPartyType = party_type || partyType || 'customer';
   const prefix = finalPartyType === 'vendor' ? 'CH-VD-' : 'CH-CU-';
-  const finalOutwardNo = outward_no || outwardNo || await generateNextSequence('app_outward_entries', 'outward_no', prefix, finalCompanyId);
+  const finalOutwardNo = outward_no || outwardNo || await generateNextSequence('app_outward_entries', 'outward_no', '', finalCompanyId, 2001);
   const finalCustomerId = customer_id || customerId;
   const finalCustomerName = customer_name || customerName;
   const finalVendorId = vendor_id || vendorId;

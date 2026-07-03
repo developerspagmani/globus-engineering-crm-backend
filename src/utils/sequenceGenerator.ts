@@ -14,7 +14,8 @@ export async function generateNextSequence(
   tableName: string,
   fieldName: string,
   defaultPrefix: string = '',
-  companyId?: string | null
+  companyId?: string | null,
+  defaultStartNum: number = 1901
 ): Promise<string> {
   try {
     // Fetch all non-empty values of this field to find the highest number
@@ -54,7 +55,7 @@ export async function generateNextSequence(
     if (maxNum === 0) {
       // If we couldn't find any existing numeric sequence, start with 1901
       // as the user mentioned: "even 1900 next genrating should be 1901"
-      return `${defaultPrefix}1901`;
+      return `${defaultPrefix}${defaultStartNum}`;
     }
 
     const nextNum = maxNum + 1;

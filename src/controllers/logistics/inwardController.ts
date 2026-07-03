@@ -265,7 +265,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
 
   try {
-    const finalInwardNo = inward_no || await generateNextSequence('app_inward_entries', 'inward_no', 'INW-', finalCompanyId);
+    const finalInwardNo = inward_no || await generateNextSequence('app_inward_entries', 'inward_no', '', finalCompanyId, 1001);
 
     let attempts = 0;
     let entry;
@@ -651,7 +651,7 @@ export const generateDcNo = async (req: Request, res: Response) => {
     if (!finalCompanyId) {
       return res.status(400).json({ error: 'Company ID is required' });
     }
-    const dcNo = await generateNextSequence('app_inward_entries', 'dc_no', '', String(finalCompanyId));
+    const dcNo = await generateNextSequence('app_inward_entries', 'dc_no', '', String(finalCompanyId), 4001);
     res.json({ dcNo });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to generate DC No', detail: error.message });
