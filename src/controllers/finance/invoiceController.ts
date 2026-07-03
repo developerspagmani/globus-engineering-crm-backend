@@ -247,7 +247,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       const mapped = {
         ...base,
         id: inv.id.toString(),
-        invoiceNumber: (inv.invoice_no && inv.invoice_no !== 0) ? inv.invoice_no.toString() : (inv.dc_no || (inv.delivery_no ? `DC-${inv.delivery_no}` : inv.id.toString())),
+        invoiceNumber: (inv.invoice_no && inv.invoice_no !== 0) ? inv.invoice_no.toString() : (inv.delivery_no ? inv.delivery_no.toString() : (inv.dc_no || inv.id.toString())),
         date: inv.invoice_date,
         dueDate: inv.due_date,
         customerId: inv.customer_id?.toString(),
