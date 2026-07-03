@@ -66,7 +66,8 @@ export async function generateNextSequence(
       ? nextNumStr.padStart(paddingLength, '0') 
       : nextNumStr;
 
-    return `${foundPrefix}${finalNumStr}`;
+    const prefixToUse = defaultPrefix !== '' ? defaultPrefix : foundPrefix;
+    return `${prefixToUse}${finalNumStr}`;
   } catch (error) {
     console.error(`Error generating sequence for ${tableName}.${fieldName}:`, error);
     // Fallback to timestamp if query fails
