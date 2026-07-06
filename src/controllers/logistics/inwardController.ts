@@ -142,51 +142,73 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       const invoicedForThisEntry = invoiceGroups.get(String(e.id)) || [];
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
 
+      // 1. Pre-aggregate quantities by item identifier
+      const invoicedTotals = new Map<string, number>();
+      const dispatchedTotals = new Map<string, number>();
+      const sentToVendorTotals = new Map<string, number>();
+      const returnedFromVendorTotals = new Map<string, number>();
+
+      invoicedForThisEntry.forEach((inv: any) => {
+        const invItems = JSON.parse(inv.items_json || '[]');
+        invItems.forEach((ii: any) => {
+          const id = (ii.description || ii.item_name || '').toLowerCase();
+          const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
+          invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
+        });
+      });
+
+      outwardsForThisEntry.forEach((ow: any) => {
+        const owItems = JSON.parse(ow.items_json || '[]');
+        owItems.forEach((oi: any) => {
+          const id = (oi.description || oi.item_name || '').toLowerCase();
+          const qty = parseFloat(oi.quantity || oi.qty || '0');
+          if (ow.party_type === 'vendor') {
+            sentToVendorTotals.set(id, (sentToVendorTotals.get(id) || 0) + qty);
+          } else {
+            dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
+          }
+        });
+      });
+
+      const relatedVendorInwards = allReturnedInwards.filter((ei: any) => 
+        ei.party_type === 'vendor' && outwardsForThisEntry.some(ow => String(ow.id) === String(ei.outward_id))
+      );
+      
+      relatedVendorInwards.forEach((vi: any) => {
+        const viItems = JSON.parse(vi.items_json || '[]');
+        viItems.forEach((vii: any) => {
+          const id = (vii.description || vii.item_name || '').toLowerCase();
+          const qty = parseFloat(vii.quantity || vii.qty || '0');
+          returnedFromVendorTotals.set(id, (returnedFromVendorTotals.get(id) || 0) + qty);
+        });
+      });
+
+      const itemCounts = new Map<string, number>();
+      items.forEach((item: any) => {
+        const id = (item.description || item.item_name || '').toLowerCase();
+        itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
+      });
+
       const balanceItems = items.map((item: any) => {
-        let totalInvoiced = 0;
-        let totalDispatched = 0;
-        let totalSentToVendor = 0;
-        let totalReturnedFromVendor = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
-
-        // 1. Add Invoiced quantities (Billed to customer)
-        invoicedForThisEntry.forEach((inv: any) => {
-          const invItems = JSON.parse(inv.items_json || '[]');
-          const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
-          if (matchingItem) {
-            totalInvoiced += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
-          }
-        });
-
-        // 2. Add Outward quantities (Sent to Vendor OR Customer)
-        outwardsForThisEntry.forEach((ow: any) => {
-          const owItems = JSON.parse(ow.items_json || '[]');
-          const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
-          if (matchingItem) {
-            if (ow.party_type === 'vendor') {
-              totalSentToVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-            } else {
-              // Standard Customer Delivery
-              totalDispatched += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-            }
-          }
-        });
-
-        // 3. Find Inwards FROM Vendors that link to Outwards to Vendors linked to THIS Inward
-        const relatedVendorInwards = allReturnedInwards.filter((ei: any) => 
-          ei.party_type === 'vendor' &&
-          outwardsForThisEntry.some(ow => String(ow.id) === String(ei.outward_id))
-        );
-
-        relatedVendorInwards.forEach((vi: any) => {
-          const viItems = JSON.parse(vi.items_json || '[]');
-          const matchingItem = viItems.find((vii: any) => (vii.description || vii.item_name || '').toLowerCase() === itemIdentifier);
-          if (matchingItem) {
-            totalReturnedFromVendor += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-          }
-        });
-
         const originalQty = parseFloat(item.quantity || item.qty || '0');
+
+        const currentCount = itemCounts.get(itemIdentifier) || 0;
+        itemCounts.set(itemIdentifier, currentCount - 1);
+        const isLast = currentCount === 1;
+
+        const consume = (pool: Map<string, number>, max: number) => {
+          const available = pool.get(itemIdentifier) || 0;
+          const consumed = isLast ? available : Math.min(available, max);
+          pool.set(itemIdentifier, available - consumed);
+          return consumed;
+        };
+
+        const totalInvoiced = consume(invoicedTotals, originalQty);
+        const totalDispatched = consume(dispatchedTotals, originalQty);
+        const totalSentToVendor = consume(sentToVendorTotals, originalQty);
+        const totalReturnedFromVendor = consume(returnedFromVendorTotals, originalQty);
+
         const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
         
         // DUAL BALANCE LOGIC:
@@ -448,48 +470,72 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       const invoicedForThisEntry = invoiceGroups.get(String(entry.id)) || [];
       const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
 
+      const invoicedTotals = new Map<string, number>();
+      const dispatchedTotals = new Map<string, number>();
+      const sentToVendorTotals = new Map<string, number>();
+      const returnedFromVendorTotals = new Map<string, number>();
+
+      invoicedForThisEntry.forEach((inv: any) => {
+        const invItems = JSON.parse(inv.items_json || '[]');
+        invItems.forEach((ii: any) => {
+          const id = (ii.description || ii.item_name || '').toLowerCase();
+          const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
+          invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
+        });
+      });
+
+      outwardsForThisEntry.forEach((ow: any) => {
+        const owItems = JSON.parse(ow.items_json || '[]');
+        owItems.forEach((oi: any) => {
+          const id = (oi.description || oi.item_name || '').toLowerCase();
+          const qty = parseFloat(oi.quantity || oi.qty || '0');
+          if (ow.party_type === 'vendor') {
+            sentToVendorTotals.set(id, (sentToVendorTotals.get(id) || 0) + qty);
+          } else {
+            dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
+          }
+        });
+      });
+
+      const vendorInwardsForThisCustomer = allReturnedInwards.filter(i => 
+         i.party_type === 'vendor' && outwardsForThisEntry.some(ow => String(ow.id) === String(i.outward_id))
+      );
+
+      vendorInwardsForThisCustomer.forEach((vi: any) => {
+        const viItems = JSON.parse(vi.items_json || '[]');
+        viItems.forEach((vii: any) => {
+          const id = (vii.description || vii.item_name || '').toLowerCase();
+          const qty = parseFloat(vii.quantity || vii.qty || '0');
+          returnedFromVendorTotals.set(id, (returnedFromVendorTotals.get(id) || 0) + qty);
+        });
+      });
+
+      const itemCounts = new Map<string, number>();
+      originalItems.forEach((item: any) => {
+        const id = (item.description || item.item_name || '').toLowerCase();
+        itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
+      });
+
       const balanceItems = originalItems.map((item: any) => {
-        let totalInvoicedQty = 0;
-        let totalDispatchedQty = 0;
-        let totalSentToVendorQty = 0;
-        let totalReturnedFromVendorQty = 0;
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
-
-        invoicedForThisEntry.forEach((inv: any) => {
-          const invItems = JSON.parse(inv.items_json || '[]');
-          const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
-          if (matchingItem) {
-            totalInvoicedQty += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
-          }
-        });
-
-        outwardsForThisEntry.forEach((ow: any) => {
-          const owItems = JSON.parse(ow.items_json || '[]');
-          const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
-          if (matchingItem) {
-            if (ow.party_type === 'vendor') {
-              totalSentToVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-            } else {
-              totalDispatchedQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-            }
-          }
-        });
-
-        // Find Vendor Returns
-        const vendorInwardsForThisCustomer = allReturnedInwards.filter(i => 
-           i.party_type === 'vendor' && 
-           outwardsForThisEntry.some(ow => String(ow.id) === String(i.outward_id))
-        );
-
-        vendorInwardsForThisCustomer.forEach((vi: any) => {
-          const viItems = JSON.parse(vi.items_json || '[]');
-          const matchingItem = viItems.find((vii: any) => (vii.description || vii.item_name || '').toLowerCase() === itemIdentifier);
-          if (matchingItem) {
-            totalReturnedFromVendorQty += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-          }
-        });
-
         const original = parseFloat(item.quantity || item.qty || '0');
+
+        const currentCount = itemCounts.get(itemIdentifier) || 0;
+        itemCounts.set(itemIdentifier, currentCount - 1);
+        const isLast = currentCount === 1;
+
+        const consume = (pool: Map<string, number>, max: number) => {
+          const available = pool.get(itemIdentifier) || 0;
+          const consumed = isLast ? available : Math.min(available, max);
+          pool.set(itemIdentifier, available - consumed);
+          return consumed;
+        };
+
+        const totalInvoicedQty = consume(invoicedTotals, original);
+        const totalDispatchedQty = consume(dispatchedTotals, original);
+        const totalSentToVendorQty = consume(sentToVendorTotals, original);
+        const totalReturnedFromVendorQty = consume(returnedFromVendorTotals, original);
+
         const currentlyAtVendor = Math.max(0, totalSentToVendorQty - totalReturnedFromVendorQty);
         
         const billingBalance = Math.max(0, original - totalInvoicedQty);
@@ -578,34 +624,53 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       where: { inward_id: String(entry.id) }
     });
 
+    const invoicedTotals = new Map<string, number>();
+    const dispatchedTotals = new Map<string, number>();
+
+    invoices.forEach((inv: any) => {
+      const invItems = JSON.parse(inv.items_json || '[]');
+      invItems.forEach((ii: any) => {
+        const id = (ii.description || ii.item_name || '').toLowerCase();
+        const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
+        invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
+      });
+    });
+
+    outwards.forEach((ow: any) => {
+      const owItems = JSON.parse(ow.items_json || '[]');
+      owItems.forEach((oi: any) => {
+        const id = (oi.description || oi.item_name || '').toLowerCase();
+        const qty = parseFloat(oi.quantity || oi.qty || '0');
+        if (ow.party_type !== 'vendor') {
+           dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
+        }
+      });
+    });
+
+    const itemCounts = new Map<string, number>();
+    items.forEach((item: any) => {
+      const id = (item.description || item.item_name || '').toLowerCase();
+      itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
+    });
+
     const balanceItems = items.map((item: any) => {
-      let totalInvoiced = 0;
-      let totalDispatched = 0;
       const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
-
-      // Add Invoiced quantities
-      invoices.forEach((inv: any) => {
-        const invItems = JSON.parse(inv.items_json || '[]');
-        const matchingItem = invItems.find((ii: any) => (ii.description || ii.item_name || '').toLowerCase() === itemIdentifier);
-        if (matchingItem) {
-          totalInvoiced += (parseFloat(matchingItem.qty || matchingItem.quantity || '0') + parseFloat(matchingItem.wopQty || matchingItem.wop_qty || '0'));
-        }
-      });
-
-      // Add Outward quantities
-      outwards.forEach((ow: any) => {
-        const owItems = JSON.parse(ow.items_json || '[]');
-        const matchingItem = owItems.find((oi: any) => (oi.description || oi.item_name || '').toLowerCase() === itemIdentifier);
-        if (matchingItem) {
-          if (ow.party_type === 'vendor') {
-            // Vendor sent qty is tracked but we focus on dispatchBalance for customer return
-          } else {
-             totalDispatched += parseFloat(matchingItem.quantity || matchingItem.qty || '0');
-          }
-        }
-      });
-
       const originalQty = parseFloat(item.quantity || item.qty || '0');
+
+      const currentCount = itemCounts.get(itemIdentifier) || 0;
+      itemCounts.set(itemIdentifier, currentCount - 1);
+      const isLast = currentCount === 1;
+
+      const consume = (pool: Map<string, number>, max: number) => {
+        const available = pool.get(itemIdentifier) || 0;
+        const consumed = isLast ? available : Math.min(available, max);
+        pool.set(itemIdentifier, available - consumed);
+        return consumed;
+      };
+
+      const totalInvoiced = consume(invoicedTotals, originalQty);
+      const totalDispatched = consume(dispatchedTotals, originalQty);
+
       const billingBalance = Math.max(0, originalQty - totalInvoiced);
       const dispatchBalance = Math.max(0, originalQty - totalDispatched); // Simplified for direct customer return
 
@@ -645,9 +710,9 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const generateDcNo = async (req: Request, res: Response) => {
+export const generateDcNo = async (req: AuthRequest, res: Response) => {
   try {
-    const finalCompanyId = req.query.companyId || (req as any).user?.company_id;
+    const finalCompanyId = req.query.companyId || req.user?.company_id;
     if (!finalCompanyId) {
       return res.status(400).json({ error: 'Company ID is required' });
     }
