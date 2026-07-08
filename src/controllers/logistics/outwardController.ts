@@ -135,7 +135,9 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
     driver_name, driverName,
     notes, status, items, company_id, companyId,
     inward_id, inwardId,
-    inward_no, inwardNo
+    inward_no, inwardNo,
+    coating_name, coatingName,
+    purpose
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : user?.company_id;
@@ -171,6 +173,8 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           company_id: finalCompanyId,
           inward_id: String(finalInwardId || ''),
           inward_no: String(finalInwardNo || ''),
+          coating_name: String(coating_name || coatingName || ''),
+          purpose: String(purpose || ''),
           status: status || 'completed',
           amount: parseFloat(String(req.body.amount || '0')),
           items_json: JSON.stringify(items || []),
@@ -262,7 +266,9 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
     challan_no, challanNo,
     vehicle_no, vehicleNo,
     driver_name, driverName,
-    notes, status, items 
+    notes, status, items,
+    coating_name, coatingName,
+    purpose
   } = req.body;
 
   const finalOutwardNo = outward_no || outwardNo;
@@ -289,6 +295,8 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           driver_name,
           notes,
           status,
+          coating_name: coating_name || coatingName,
+          purpose,
           items_json: items ? JSON.stringify(items) : undefined,
           amount: parseFloat(String(req.body.amount || 0)),
         }

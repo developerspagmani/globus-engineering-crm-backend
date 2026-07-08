@@ -332,6 +332,8 @@ model OutwardEntry {
   driver_name       String?   @db.VarChar(100)
   notes             String?   @db.Text
   amount            Float?    @default(0)
+  coating_name      String?   @db.VarChar(255)
+  purpose           String?   @db.VarChar(255)
 
   @@map("app_outward_entries")
 }

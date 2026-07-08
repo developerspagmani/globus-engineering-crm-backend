@@ -569,8 +569,8 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                         data: { delivery_no: actualChallanNo }
                     });
                 }
-            } else if (billType !== 'With Process') {
-                // Only create a new Challan if it's not a pure Invoice
+            } else {
+                // Generate a new Delivery Challan regardless of billType
                 const challanNumVal = delNo || invNo || newInvoice.id;
                 await tx.challan.create({
                     data: {
