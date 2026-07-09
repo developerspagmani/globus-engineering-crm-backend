@@ -14,6 +14,8 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
   const fromDate = req.query.fromDate as string;
   const toDate = req.query.toDate as string;
 
@@ -58,7 +60,7 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { received_date: 'desc' }
+        orderBy: sortBy ? { [sortBy]: sortOrder } : { received_date: 'desc' }
       }),
       prisma.purchaseBill.count({ where })
     ]);

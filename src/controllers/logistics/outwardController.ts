@@ -14,6 +14,8 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
 
   try {
     const where: any = {
@@ -80,7 +82,7 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: [
+        orderBy: sortBy ? { [sortBy]: sortOrder } : [
           { date: 'desc' },
           { created_at: 'desc' }
         ]

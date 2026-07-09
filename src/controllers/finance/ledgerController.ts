@@ -13,6 +13,8 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 20;
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
 
   try {
     const where: any = {
@@ -106,7 +108,7 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
         where: entriesWhere,
         skip,
         take: limit,
-        orderBy: [
+        orderBy: sortBy ? { [sortBy]: sortOrder } : [
           { date: 'desc' },
           { created_at: 'desc' }
         ]

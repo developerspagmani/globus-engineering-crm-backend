@@ -14,6 +14,8 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
   const id = req.query.id as string;
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'desc' ? 'desc' : 'asc';
 
   try {
     const where: any = {
@@ -74,7 +76,7 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { customer_name: 'asc' }
+        orderBy: sortBy ? { [sortBy]: sortOrder } : { customer_name: 'asc' }
       }),
       prisma.legacyCustomer.count({ where })
     ]);

@@ -17,6 +17,8 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
   const limit = req.query.id ? 100 : (parseInt(req.query.limit as string) || 10);
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
   const id = req.query.id as string;
 
   try {
@@ -106,7 +108,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { date: 'desc' }
+        orderBy: sortBy ? { [sortBy]: sortOrder } : { date: 'desc' }
       }),
       prisma.voucher.count({ where }),
       prisma.voucher.aggregate({
@@ -199,25 +201,46 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
               return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
             }).filter((n: number) => !isNaN(n));
 
-            const invoices = await (tx as any).legacyInvoice.findMany({
-              where: {
-                AND: [
-                  {
-                    OR: [
-                      { id: { in: invNumsAsInts } },
-                      { invoice_no: { in: invNumsAsInts } },
-                      { dc_no: { in: invNumbers } }
-                    ]
-                  },
-                  {
-                    OR: [
-                      { company_id: finalCompanyId ? String(finalCompanyId) : undefined },
-                      { company_id: finalCompanyId ? String(finalCompanyId).toLowerCase() : undefined }
-                    ]
-                  }
-                ]
-              }
-            });
+            const exactIds = Array.isArray(items) 
+              ? items.map((i: any) => parseInt(String(i.id).replace(/\D/g, ''), 10)).filter((n: number) => !isNaN(n))
+              : [];
+
+            let invoices: any[] = [];
+            if (exactIds.length > 0) {
+              invoices = await (tx as any).legacyInvoice.findMany({
+                where: {
+                  AND: [
+                    { id: { in: exactIds } },
+                    {
+                      OR: [
+                        { company_id: finalCompanyId ? String(finalCompanyId) : undefined },
+                        { company_id: finalCompanyId ? String(finalCompanyId).toLowerCase() : undefined }
+                      ]
+                    }
+                  ]
+                }
+              });
+            } else {
+              invoices = await (tx as any).legacyInvoice.findMany({
+                where: {
+                  AND: [
+                    {
+                      OR: [
+                        { id: { in: invNumsAsInts } },
+                        { invoice_no: { in: invNumsAsInts } },
+                        { dc_no: { in: invNumbers } }
+                      ]
+                    },
+                    {
+                      OR: [
+                        { company_id: finalCompanyId ? String(finalCompanyId) : undefined },
+                        { company_id: finalCompanyId ? String(finalCompanyId).toLowerCase() : undefined }
+                      ]
+                    }
+                  ]
+                }
+              });
+            }
 
             const totalSettlementAmount = finalAmount + (parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0) + (parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0);
             let remainingAmount = totalSettlementAmount;
@@ -406,14 +429,30 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
                 return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
               }).filter((n: number) => !isNaN(n));
 
-              const invoices = await (tx as any).legacyInvoice.findMany({
-                where: {
-                  AND: [
-                    { OR: [{ id: { in: invNumsAsInts } }, { invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
-                    { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
-                  ]
-                }
-              });
+              const exactIds = Array.isArray(items) 
+                ? items.map((i: any) => parseInt(String(i.id).replace(/\D/g, ''), 10)).filter((n: number) => !isNaN(n))
+                : [];
+
+              let invoices: any[] = [];
+              if (exactIds.length > 0) {
+                invoices = await (tx as any).legacyInvoice.findMany({
+                  where: {
+                    AND: [
+                      { id: { in: exactIds } },
+                      { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
+                    ]
+                  }
+                });
+              } else {
+                invoices = await (tx as any).legacyInvoice.findMany({
+                  where: {
+                    AND: [
+                      { OR: [{ id: { in: invNumsAsInts } }, { invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
+                      { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
+                    ]
+                  }
+                });
+              }
 
               const totalSettlementDelta = deltaAmount + (parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0) + (parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0);
               let remainingAmount = totalSettlementDelta;

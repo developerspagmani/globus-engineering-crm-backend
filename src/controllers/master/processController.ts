@@ -10,6 +10,8 @@ export const getProcesses = async (req: Request, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'desc' ? 'desc' : 'asc';
 
   try {
     const where: any = {
@@ -39,7 +41,7 @@ export const getProcesses = async (req: Request, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { created_at: 'desc' },
+        orderBy: sortBy ? { [sortBy]: sortOrder } : { created_at: 'desc' },
       }),
       (prisma as any).process.count({ where })
     ]);

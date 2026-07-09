@@ -5,9 +5,12 @@ import crypto from 'crypto';
 export const getPriceFixings = async (req: Request, res: Response) => {
   try {
     const companyId = (req.query.companyId || req.query.company_id) as string;
+    const sortBy = req.query.sortBy as string;
+    const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
+
     const priceFixings = await (prisma as any).priceFixing.findMany({
       where: companyId ? { company_id: String(companyId) } : {},
-      orderBy: { created_at: 'desc' },
+      orderBy: sortBy ? { [sortBy]: sortOrder } : { created_at: 'desc' },
     });
     res.json({ success: true, data: priceFixings });
   } catch (error: any) {

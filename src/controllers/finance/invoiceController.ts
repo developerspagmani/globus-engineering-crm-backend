@@ -40,6 +40,8 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const skip = (page - 1) * limit;
 
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
   const status = req.query.status as string;
   const fromDate = req.query.fromDate as string;
   const toDate = req.query.toDate as string;
@@ -52,6 +54,11 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       baseWhere.AND.push({ company_id: String(effectiveCompanyId) });
     } else if (user && user.role !== 'super_admin') {
       baseWhere.AND.push({ id: -1 }); 
+    }
+
+    const customerId = (req.query.customer_id || req.query.customerId) as string;
+    if (customerId) {
+      baseWhere.AND.push({ customer_id: parseInt(customerId) });
     }
 
     // Search Filter
@@ -195,7 +202,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         include: { customer: true },
         skip,
         take: limit,
-        orderBy: [{ invoice_date: 'desc' }, { id: 'desc' }]
+        orderBy: sortBy ? { [sortBy]: sortOrder } : [{ invoice_date: 'desc' }, { id: 'desc' }]
       }),
       prisma.legacyInvoice.count({ where: filteredWhere }),
       // Sums use baseWhere so summary cards stay consistent (e.g. the 12.45 Cr total)

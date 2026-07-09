@@ -13,6 +13,8 @@ export const getAllVendors = async (req: AuthRequest, res: Response) => {
   const limit = parseInt(req.query.limit as string) || 10;
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
+  const sortBy = req.query.sortBy as string;
+  const sortOrder = (req.query.sortOrder as string) === 'desc' ? 'desc' : 'asc';
 
   try {
     const where: any = {
@@ -69,7 +71,7 @@ export const getAllVendors = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: { name: 'asc' }
+        orderBy: sortBy ? { [sortBy]: sortOrder } : { name: 'asc' }
       }),
       prisma.vendor.count({ where })
     ]);
