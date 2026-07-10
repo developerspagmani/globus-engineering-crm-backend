@@ -293,10 +293,10 @@ async function main() {
           const parsedItems = groupItems.map(gi => ({
             description: itemMap.get(gi.item_id) || 'Unknown Item',
             process: processMap.get(gi.process_id) || 'Standard',
-            qty: gi.qty || 0,
+            quantity: gi.qty || 0,
             wopQty: gi.wop_qty || 0,
-            price: gi.price || 0,
-            item_total: gi.item_total || 0
+            unitPrice: gi.price || 0,
+            amount: gi.item_total || 0
           }));
 
           await prisma.$executeRawUnsafe(

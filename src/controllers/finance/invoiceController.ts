@@ -96,11 +96,12 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       
       const allInvoices = await prisma.legacyInvoice.findMany({
           where: baseWhere,
-          select: { id: true, total: true, grand_total: true, paid_amount: true, status: true, sub_total: true, tax_total: true, bill_type: true }
+          select: { id: true, invoice_date: true, total: true, grand_total: true, paid_amount: true, status: true, sub_total: true, tax_total: true, bill_type: true }
       });
 
       let statusIds: number[] = [];
       if (statusType === 'pending') {
+          const cutoffDate = new Date('2025-01-01T00:00:00.000Z');
           statusIds = allInvoices
               .filter(inv => {
                   const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
@@ -109,7 +110,11 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
                   let grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
                   if (grand <= 0 && taxable > 0) grand = taxable + taxVal;
                   const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
-                  return (grand - paid) > 0.5 || inv.status === 'BILLED';
+                  
+                  const isPending = (grand - paid) > 0.5 || inv.status === 'BILLED';
+                  const isFrom2025 = inv.invoice_date && new Date(inv.invoice_date) >= cutoffDate;
+                  
+                  return isPending && isFrom2025;
               })
               .map(inv => inv.id);
       } else if (statusType === 'paid') {
@@ -179,13 +184,12 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Specific Invoice Selection Filter (Support both ID and Invoice No selection)
+    // Specific Invoice Selection Filter (Strict ID selection)
     if (rawInvoiceNos) {
       const parts = rawInvoiceNos.split(',').map(n => n.trim()).filter(n => n !== '');
       const numericParts = parts.map(n => parseInt(n)).filter(n => !isNaN(n));
       
       const invoiceConditions = [
-        { invoice_no: { in: numericParts } }, 
         { id: { in: numericParts } }
       ];
 

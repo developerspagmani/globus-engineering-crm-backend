@@ -227,7 +227,6 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
                     {
                       OR: [
                         { id: { in: invNumsAsInts } },
-                        { invoice_no: { in: invNumsAsInts } },
                         { dc_no: { in: invNumbers } }
                       ]
                     },
@@ -447,7 +446,7 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
                 invoices = await (tx as any).legacyInvoice.findMany({
                   where: {
                     AND: [
-                      { OR: [{ id: { in: invNumsAsInts } }, { invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
+                      { OR: [{ id: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
                       { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
                     ]
                   }
