@@ -165,6 +165,8 @@ model User {
   module_permissions String?  @db.Text
   phone              String?  @db.VarChar(50)
   assigned_area      String?  @db.VarChar(100)
+  reset_otp          String?  @db.VarChar(10)
+  reset_otp_expiry   DateTime?
   company            Company? @relation(fields: [company_id], references: [id])
 
   @@index([company_id], map: "app_users_company_id_fkey")

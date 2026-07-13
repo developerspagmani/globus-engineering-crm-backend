@@ -15,7 +15,8 @@ const router = Router();
  */
 router.post('/login', authController.login);
 router.post('/register', authController.register);
-router.post('/reset-password', authController.resetPasswordDirect);
+router.post('/forgot-password', authController.forgotPasswordOtp);
+router.post('/reset-password-otp', authController.resetPasswordWithOtp);
 router.get('/me', authenticate as any, authController.getMe);
 
 export default router;

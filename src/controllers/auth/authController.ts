@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../../config/prisma';
 import crypto from 'crypto';
+import { sendOtpEmail } from '../../utils/email';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'globus_crm_secret_key_2024';
 
@@ -177,22 +178,84 @@ export const getMe = async (req: any, res: Response) => {
   }
 };
 
-export const resetPasswordDirect = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+export const forgotPasswordOtp = async (req: Request, res: Response) => {
+  const { email } = req.body;
   try {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      // Return 200 even if not found to prevent email enumeration attacks
+      return res.json({ message: 'If an account with that email exists, an OTP has been sent.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Generate a 6-digit OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    
+    // Set expiry to 10 minutes from now
+    const expiry = new Date();
+    expiry.setMinutes(expiry.getMinutes() + 10);
+
+    // Save to DB
     await prisma.user.update({
       where: { email },
-      data: { password: hashedPassword }
+      data: { 
+        reset_otp: otp,
+        reset_otp_expiry: expiry 
+      } as any // Cast to any in case prisma types didn't fully generate due to EPERM
     });
 
-    res.json({ message: 'Password reset successful' });
+    // Send the email
+    const emailSent = await sendOtpEmail(email, otp);
+    if (!emailSent) {
+      return res.status(500).json({ error: 'Failed to send OTP email. Please try again later.' });
+    }
+
+    res.json({ message: 'If an account with that email exists, an OTP has been sent.' });
   } catch (error: any) {
+    console.error('[FORGOT_PASSWORD_ERROR]', error);
+    res.status(500).json({ error: 'Failed to process request', detail: error.message });
+  }
+};
+
+export const resetPasswordWithOtp = async (req: Request, res: Response) => {
+  const { email, otp, newPassword } = req.body;
+  
+  if (!email || !otp || !newPassword) {
+    return res.status(400).json({ error: 'Email, OTP, and new password are required' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email } }) as any;
+    
+    if (!user) {
+      return res.status(404).json({ error: 'Invalid request' });
+    }
+
+    // Verify OTP
+    if (!user.reset_otp || user.reset_otp !== otp) {
+      return res.status(400).json({ error: 'Invalid OTP' });
+    }
+
+    // Verify Expiry
+    if (!user.reset_otp_expiry || new Date(user.reset_otp_expiry) < new Date()) {
+      return res.status(400).json({ error: 'OTP has expired. Please request a new one.' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    
+    // Update password and clear OTP
+    await prisma.user.update({
+      where: { email },
+      data: { 
+        password: hashedPassword,
+        reset_otp: null,
+        reset_otp_expiry: null
+      } as any
+    });
+
+    res.json({ message: 'Password reset successful. You can now login with your new password.' });
+  } catch (error: any) {
+    console.error('[RESET_PASSWORD_ERROR]', error);
     res.status(500).json({ error: 'Password reset failed', detail: error.message });
   }
 };
