@@ -379,6 +379,74 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
   }
 };
 
+const revertInvoicesForVoucher = async (tx: any, voucher: any) => {
+  if (!voucher) return;
+  if ((voucher.type === 'receipt' && voucher.party_type === 'customer') || (voucher.type === 'payment' && voucher.party_type === 'vendor')) {
+    const invNumbers = voucher.reference_no 
+      ? String(voucher.reference_no).split(',').map((s: string) => s.trim().split('(')[0].trim()).filter(Boolean) 
+      : [];
+    
+    if (invNumbers.length > 0) {
+      const invNumsAsInts = invNumbers.map((n: string) => {
+        const onlyDigits = n.replace(/\D/g, '');
+        return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
+      }).filter((n: number) => !isNaN(n));
+
+      let oldItems: any[] = [];
+      try { oldItems = JSON.parse(voucher.items_json || '[]'); } catch (e) {}
+
+      const exactIds = Array.isArray(oldItems) 
+        ? oldItems.map((i: any) => parseInt(String(i.id).replace(/\D/g, ''), 10)).filter((n: number) => !isNaN(n))
+        : [];
+
+      let invoices: any[] = [];
+      if (exactIds.length > 0) {
+        invoices = await (tx as any).legacyInvoice.findMany({
+          where: {
+            AND: [
+              { id: { in: exactIds } },
+              { OR: [{ company_id: voucher.company_id ? String(voucher.company_id) : undefined }, { company_id: voucher.company_id ? String(voucher.company_id).toLowerCase() : undefined }] }
+            ]
+          }
+        });
+      } else {
+        invoices = await (tx as any).legacyInvoice.findMany({
+          where: {
+            AND: [
+              { OR: [{ invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
+              { OR: [{ company_id: voucher.company_id ? String(voucher.company_id) : undefined }, { company_id: voucher.company_id ? String(voucher.company_id).toLowerCase() : undefined }] }
+            ]
+          }
+        });
+      }
+
+      const voucherAmount = parseFloat(String(voucher.amount || '0'));
+      const oldTds = parseFloat(String(voucher.tds_amount || '0')) || 0;
+      const oldOthers = parseFloat(String(voucher.others_amount || '0')) || 0;
+      const totalRevertAmount = voucherAmount + oldTds + oldOthers;
+      let remainingRevertAmount = totalRevertAmount;
+      
+      for (const inv of invoices) {
+        if (remainingRevertAmount <= 0) break;
+        const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
+        const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
+        const currentGrandTotal = parseFloat(cleanGrand) || 0;
+        const currentPaidAmount = parseFloat(cleanPaid) || 0;
+        
+        const revertForThisInvoice = Math.min(remainingRevertAmount, currentPaidAmount);
+        if (revertForThisInvoice <= 0) continue; 
+        
+        const newPaidAmount = currentPaidAmount - revertForThisInvoice;
+        await (tx as any).legacyInvoice.update({
+          where: { id: inv.id },
+          data: { paid_amount: String(Math.max(0, newPaidAmount)), status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED' }
+        });
+        remainingRevertAmount -= revertForThisInvoice;
+      }
+    }
+  }
+};
+
 export const updateVoucher = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const { voucher_no, date, type, party_id, party_name, party_type, amount, payment_mode, reference_no, cheque_no, description, status, tds_amount, tdsAmount, others_amount, othersAmount, inward_id, inward_no, items } = req.body;
@@ -416,61 +484,61 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
           }
         });
 
-        if (Math.abs(deltaAmount) > 0.01) {
-          if (((type === 'receipt' && party_type === 'customer') || (type === 'payment' && party_type === 'vendor')) && deltaAmount > 0) {
-            const invNumbers = reference_no 
-              ? String(reference_no).split(',').map((s: string) => s.trim().split('(')[0].trim()).filter(Boolean) 
+        await revertInvoicesForVoucher(tx, oldVoucher);
+
+        if ((type === 'receipt' && party_type === 'customer') || (type === 'payment' && party_type === 'vendor')) {
+          const invNumbers = reference_no 
+            ? String(reference_no).split(',').map((s: string) => s.trim().split('(')[0].trim()).filter(Boolean) 
+            : [];
+          
+          if (invNumbers.length > 0) {
+            const invNumsAsInts = invNumbers.map((n: string) => {
+              const onlyDigits = n.replace(/\D/g, '');
+              return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
+            }).filter((n: number) => !isNaN(n));
+
+            const exactIds = Array.isArray(items) 
+              ? items.map((i: any) => parseInt(String(i.id).replace(/\D/g, ''), 10)).filter((n: number) => !isNaN(n))
               : [];
-            
-            if (invNumbers.length > 0) {
-              const invNumsAsInts = invNumbers.map((n: string) => {
-                const onlyDigits = n.replace(/\D/g, '');
-                return onlyDigits ? parseInt(onlyDigits, 10) : NaN;
-              }).filter((n: number) => !isNaN(n));
 
-              const exactIds = Array.isArray(items) 
-                ? items.map((i: any) => parseInt(String(i.id).replace(/\D/g, ''), 10)).filter((n: number) => !isNaN(n))
-                : [];
+            let invoices: any[] = [];
+            if (exactIds.length > 0) {
+              invoices = await (tx as any).legacyInvoice.findMany({
+                where: {
+                  AND: [
+                    { id: { in: exactIds } },
+                    { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
+                  ]
+                }
+              });
+            } else {
+              invoices = await (tx as any).legacyInvoice.findMany({
+                where: {
+                  AND: [
+                    { OR: [{ invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
+                    { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
+                  ]
+                }
+              });
+            }
 
-              let invoices: any[] = [];
-              if (exactIds.length > 0) {
-                invoices = await (tx as any).legacyInvoice.findMany({
-                  where: {
-                    AND: [
-                      { id: { in: exactIds } },
-                      { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
-                    ]
-                  }
-                });
-              } else {
-                invoices = await (tx as any).legacyInvoice.findMany({
-                  where: {
-                    AND: [
-                      { OR: [{ invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
-                      { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
-                    ]
-                  }
-                });
-              }
-
-              const totalSettlementDelta = deltaAmount + (parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0) + (parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0);
-              let remainingAmount = totalSettlementDelta;
-              for (const inv of invoices) {
-                if (remainingAmount <= 0) break;
-                const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-                const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
-                const currentGrandTotal = parseFloat(cleanGrand) || 0;
-                const currentPaidAmount = parseFloat(cleanPaid) || 0;
-                const balanceDue = currentGrandTotal - currentPaidAmount;
-                if (balanceDue <= 0.1) continue; 
-                const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
-                const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
-                await (tx as any).legacyInvoice.update({
-                  where: { id: inv.id },
-                  data: { paid_amount: String(newPaidAmount), status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED' }
-                });
-                remainingAmount -= paymentForThisInvoice;
-              }
+            const totalSettlementAmount = newAmount + (parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0) + (parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0);
+            let remainingAmount = totalSettlementAmount;
+            for (const inv of invoices) {
+              if (remainingAmount <= 0) break;
+              const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
+              const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
+              const currentGrandTotal = parseFloat(cleanGrand) || 0;
+              const currentPaidAmount = parseFloat(cleanPaid) || 0;
+              const balanceDue = currentGrandTotal - currentPaidAmount;
+              if (balanceDue <= 0.1) continue; 
+              const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
+              const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
+              await (tx as any).legacyInvoice.update({
+                where: { id: inv.id },
+                data: { paid_amount: String(newPaidAmount), status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED' }
+              });
+              remainingAmount -= paymentForThisInvoice;
             }
           }
         }
@@ -592,6 +660,7 @@ export const deleteVoucher = async (req: AuthRequest, res: Response) => {
     const voucher = await prisma.voucher.findUnique({ where: { id: String(id) } });
     await prisma.$transaction(async (tx) => {
       if (voucher) {
+        await revertInvoicesForVoucher(tx, voucher);
         await (tx.ledgerEntry as any).deleteMany({
           where: { OR: [{ reference_id: String(voucher.id) }, { reference_id: String(voucher.voucher_no) }, { vch_no: String(voucher.voucher_no) }] }
         });

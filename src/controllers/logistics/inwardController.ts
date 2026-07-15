@@ -283,7 +283,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
   const {
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
     po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items, company_id, companyId,
-    party_type, partyType, outward_id, outwardId, outward_no, outwardNo
+    party_type, partyType, outward_id, outwardId, outward_no, outwardNo, date
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : (user?.company_id || company_id || companyId);
@@ -314,7 +314,7 @@ export const createInwardEntry = async (req: AuthRequest, res: Response) => {
             status: status || 'pending',
             items_json: JSON.stringify(items || []),
             due_date: due_date ? new Date(due_date) : null,
-            date: new Date(),
+            date: date ? new Date(date) : new Date(),
             party_type: party_type || partyType || 'customer',
             outward_id: String(outward_id || outwardId || ''),
             outward_no: String(outward_no || outwardNo || '')
@@ -345,7 +345,7 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
   const {
     inward_no, customer_id, customer_name, address, vendor_id, vendor_name,
     po_reference, po_date, challan_no, dc_no, dc_date, due_date, vehicle_no, status, items,
-    party_type, partyType, outward_id, outwardId, outward_no, outwardNo
+    party_type, partyType, outward_id, outwardId, outward_no, outwardNo, date
   } = req.body;
 
   try {
@@ -366,6 +366,7 @@ export const updateInwardEntry = async (req: AuthRequest, res: Response) => {
         vehicle_no,
         status,
         due_date: due_date ? new Date(due_date) : undefined,
+        date: date ? new Date(date) : undefined,
         items_json: items ? JSON.stringify(items) : undefined,
         party_type: party_type || partyType,
         outward_id: outward_id || outwardId,

@@ -139,7 +139,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
     inward_id, inwardId,
     inward_no, inwardNo,
     coating_name, coatingName,
-    purpose
+    purpose, date
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : user?.company_id;
@@ -180,7 +180,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           status: status || 'completed',
           amount: parseFloat(String(req.body.amount || '0')),
           items_json: JSON.stringify(items || []),
-          date: new Date()
+          date: date ? new Date(date) : new Date()
         }
       });
 
@@ -270,7 +270,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
     driver_name, driverName,
     notes, status, items,
     coating_name, coatingName,
-    purpose
+    purpose, date
   } = req.body;
 
   const finalOutwardNo = outward_no || outwardNo;
@@ -299,6 +299,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           status,
           coating_name: coating_name || coatingName,
           purpose,
+          date: date ? new Date(date) : undefined,
           items_json: items ? JSON.stringify(items) : undefined,
           amount: parseFloat(String(req.body.amount || 0)),
         }
