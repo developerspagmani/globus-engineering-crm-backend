@@ -88,10 +88,55 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     }
 
 
+    // Party Type Filter
+    const partyType = req.query.partyType as string;
+    if (partyType && partyType !== 'all') {
+      const partyWhereCondition = partyType === 'customer' ? {
+        OR: [
+          { party_type: 'customer' },
+          { party_type: null },
+          { party_type: '' }
+        ]
+      } : { party_type: partyType };
+
+      const relatedInwards = await prisma.inwardEntry.findMany({
+        where: partyWhereCondition,
+        select: { id: true }
+      });
+      const inwardIds = relatedInwards.map(i => i.id);
+      
+      if (partyType === 'vendor') {
+         baseWhere.AND.push({ inward_id: { in: inwardIds } });
+      } else if (partyType === 'customer') {
+         baseWhere.AND.push({
+           OR: [
+             { inward_id: { in: inwardIds } },
+             { inward_id: null },
+             { inward_id: '' }
+           ]
+         });
+      }
+    }
+
+    // Type Filter
+    const type = req.query.type as string;
+    if (type && type !== 'all') {
+      const types = type.split(',').map(t => {
+        if (t === 'WOP') return 'without_process';
+        if (t === 'BOTH') return 'both';
+        return 'with_process';
+      });
+      if (types.includes('with_process')) {
+        baseWhere.AND.push({ OR: [{ bill_type: { in: types } }, { bill_type: null }, { bill_type: '' }] });
+      } else {
+        baseWhere.AND.push({ bill_type: { in: types } });
+      }
+    }
+
     // clone baseWhere for the filtered view (the list)
     const filteredWhere = JSON.parse(JSON.stringify(baseWhere));
 
-    // Smart Status Filter (Only applied to the list, not the overall totals)
+    // Smart Status Filter
     if (status && status !== 'all') {
       const statusType = status.toLowerCase();
       
@@ -140,51 +185,6 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Type Filter (Only applied to the list)
-    const type = req.query.type as string;
-    if (type && type !== 'all') {
-      const types = type.split(',').map(t => {
-        if (t === 'WOP') return 'without_process';
-        if (t === 'BOTH') return 'both';
-        return 'with_process';
-      });
-      if (types.includes('with_process')) {
-        filteredWhere.AND.push({ OR: [{ bill_type: { in: types } }, { bill_type: null }, { bill_type: '' }] });
-      } else {
-        filteredWhere.AND.push({ bill_type: { in: types } });
-      }
-    }
-
-    // Party Type Filter
-    const partyType = req.query.partyType as string;
-    if (partyType && partyType !== 'all') {
-      const partyWhereCondition = partyType === 'customer' ? {
-        OR: [
-          { party_type: 'customer' },
-          { party_type: null },
-          { party_type: '' }
-        ]
-      } : { party_type: partyType };
-
-      const relatedInwards = await prisma.inwardEntry.findMany({
-        where: partyWhereCondition,
-        select: { id: true }
-      });
-      const inwardIds = relatedInwards.map(i => i.id);
-      
-      if (partyType === 'vendor') {
-         filteredWhere.AND.push({ inward_id: { in: inwardIds } });
-      } else if (partyType === 'customer') {
-         filteredWhere.AND.push({
-           OR: [
-             { inward_id: { in: inwardIds } },
-             { inward_id: null },
-             { inward_id: '' }
-           ]
-         });
-      }
-    }
-
     // Specific Invoice Selection Filter (Strict ID selection)
     if (rawInvoiceNos) {
       const parts = rawInvoiceNos.split(',').map(n => n.trim()).filter(n => n !== '');
@@ -210,10 +210,10 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         orderBy: sortBy ? { [sortBy]: sortOrder } : [{ invoice_date: 'desc' }, { id: 'desc' }]
       }),
       prisma.legacyInvoice.count({ where: filteredWhere }),
-      // Sums use baseWhere so summary cards stay consistent (e.g. the 12.45 Cr total)
+      // Sums use filteredWhere so summary cards update dynamically with active partyType, search, and date filters
       prisma.legacyInvoice.findMany({
-        where: baseWhere,
-        select: { total: true, grand_total: true, paid_amount: true, invoice_date: true, sub_total: true, tax_total: true }
+        where: filteredWhere,
+        select: { total: true, grand_total: true, paid_amount: true, invoice_date: true, sub_total: true, tax_total: true, bill_type: true }
       })
     ]);
 
@@ -225,7 +225,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
         const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
         
-        let grand = isWop ? 0 : (inv.grand_total_float ?? (parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0));
+        let grand = (inv.grand_total_float ?? (parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0));
         
         // Fallback: If grand_total is zero but we have taxable total, reconstruct the grand total
         if (grand <= 0 && taxable > 0) {
