@@ -40,7 +40,8 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const skip = (page - 1) * limit;
 
   const search = (req.query.search as string || '').toLowerCase();
-  const sortBy = req.query.sortBy as string;
+  let sortBy = req.query.sortBy as string;
+  if (sortBy === 'created_at') sortBy = 'app_created_at';
   const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
   const status = req.query.status as string;
   const fromDate = req.query.fromDate as string;

@@ -308,14 +308,103 @@ export const processEmailReminders = async (req: Request, res: Response) => {
       }
     }
 
+    const leadSentCount = await processLeadVisitReminders(company_id as string | undefined);
+
     res.json({
       success: true,
-      totalSent: sentCount,
+      totalSent: sentCount + leadSentCount,
+      invoicesSent: sentCount,
+      leadRemindersSent: leadSentCount,
       details: results
     });
   } catch (error: any) {
     console.error('Error processing reminders:', error);
     res.status(500).json({ error: 'Failed to process reminders', detail: error.message });
+  }
+};
+
+export const processLeadVisitReminders = async (companyId?: string) => {
+  try {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const startOfTomorrow = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 0, 0, 0, 0);
+    const endOfTomorrow = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 23, 59, 59, 999);
+
+    const whereLead: any = {
+      next_visit_date: {
+        gte: startOfTomorrow,
+        lte: endOfTomorrow
+      }
+    };
+
+    if (companyId) {
+      whereLead.company_id = companyId;
+    }
+
+    const leads = await prisma.lead.findMany({
+      where: whereLead
+    });
+
+    let sentCount = 0;
+
+    for (const lead of leads) {
+      if (!lead.agent_id) continue;
+
+      const milestoneAlreadySent = await prisma.emailLog.findFirst({
+        where: {
+          reminderType: `lead_visit_${lead.id}`
+        }
+      });
+      if (milestoneAlreadySent) continue;
+
+      const salesPerson = await prisma.user.findUnique({
+        where: { id: lead.agent_id }
+      });
+
+      if (!salesPerson || !salesPerson.email) continue;
+
+      const visitDateStr = lead.next_visit_date ? new Date(lead.next_visit_date).toLocaleDateString('en-GB') : 'Tomorrow';
+
+      const subject = `[Reminder] Upcoming Lead Visit Tomorrow - ${lead.name}`;
+      const body = `Dear ${salesPerson.name || 'Sales Representative'},
+
+This is a friendly reminder that you have a scheduled visit TOMORROW (${visitDateStr}) for the following lead:
+
+Lead Details:
+- Name: ${lead.name}
+- Company: ${lead.company || 'N/A'}
+- Phone: ${lead.phone || 'N/A'}
+- Email: ${lead.email || 'N/A'}
+- Area: ${lead.assigned_area || 'N/A'}
+- Product Interest: ${lead.product_interest || 'N/A'}
+- Notes: ${lead.notes || 'N/A'}
+
+Please ensure you are prepared and follow up accordingly.
+
+Best regards,
+Globus Engineering System`;
+
+      const success = await sendEmail(salesPerson.email, subject, body);
+      if (success) {
+        sentCount++;
+        await prisma.emailLog.create({
+          data: {
+            invoiceId: 0,
+            customerId: 0,
+            reminderType: `lead_visit_${lead.id}`,
+            emailSent: new Date(),
+            recipientEmail: salesPerson.email,
+            status: 'sent'
+          }
+        });
+        console.log(`✅ Lead 1-day reminder sent to Sales Person ${salesPerson.email} for lead ${lead.name}`);
+      }
+    }
+
+    return sentCount;
+  } catch (error) {
+    console.error('Error processing lead visit reminders:', error);
+    return 0;
   }
 };
 

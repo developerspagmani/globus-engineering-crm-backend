@@ -93,6 +93,9 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
     if (search) {
       entriesWhere.AND.push({
         OR: [
+          { party_name: { contains: search.toLowerCase() } },
+          { party_name: { contains: search.toUpperCase() } },
+          { party_name: { contains: search } },
           { vch_no: { contains: search.toLowerCase() } },
           { vch_no: { contains: search.toUpperCase() } },
           { description: { contains: search.toLowerCase() } },

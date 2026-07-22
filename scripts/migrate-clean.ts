@@ -257,7 +257,13 @@ async function main() {
       }
 
       if (pricesToCreate.length > 0) {
-        await prisma.priceFixing.createMany({ data: pricesToCreate, skipDuplicates: true });
+        const chunk = 500;
+        for (let i = 0; i < pricesToCreate.length; i += chunk) {
+          await prisma.priceFixing.createMany({ 
+            data: pricesToCreate.slice(i, i + chunk), 
+            skipDuplicates: true 
+          });
+        }
         console.log(`✅ Price fixings migrated: ${pricesToCreate.length}`);
       }
     }
@@ -374,41 +380,31 @@ async function main() {
     });
     allInwards.forEach(inw => inwardMap.set(String(inw.inward_no), inw.id));
 
-    let processedInvoices = 0;
-    const linkPageSize = 1000;
     let linksUpdated = 0;
 
-    while (true) {
-      const pageInvoices = await (prisma as any).legacyInvoice.findMany({
-        where: {
-          company_id: companyId,
-          OR: [{ inward_id: null }, { inward_id: '' }]
-        },
-        select: { id: true, inward_no: true },
-        take: linkPageSize
+    const allPendingInvoices = await (prisma as any).legacyInvoice.findMany({
+      where: {
+        company_id: companyId,
+        OR: [{ inward_id: null }, { inward_id: '' }]
+      },
+      select: { id: true, inward_no: true }
+    });
+
+    const updateGroups = new Map<string, number[]>();
+    for (const inv of allPendingInvoices) {
+      const targetId = inwardMap.get(String(inv.inward_no));
+      if (targetId) {
+        if (!updateGroups.has(targetId)) updateGroups.set(targetId, []);
+        updateGroups.get(targetId)?.push(inv.id);
+      }
+    }
+
+    for (const [targetId, invoiceIds] of updateGroups.entries()) {
+      const res = await (prisma as any).legacyInvoice.updateMany({
+        where: { id: { in: invoiceIds } },
+        data: { inward_id: targetId }
       });
-
-      if (pageInvoices.length === 0) break;
-
-      const updateGroups = new Map<string, number[]>();
-      for (const inv of pageInvoices) {
-        const targetId = inwardMap.get(String(inv.inward_no));
-        if (targetId) {
-          if (!updateGroups.has(targetId)) updateGroups.set(targetId, []);
-          updateGroups.get(targetId)?.push(inv.id);
-        }
-      }
-
-      for (const [targetId, invoiceIds] of updateGroups.entries()) {
-        const res = await (prisma as any).legacyInvoice.updateMany({
-          where: { id: { in: invoiceIds } },
-          data: { inward_id: targetId }
-        });
-        linksUpdated += res.count;
-      }
-
-      processedInvoices += pageInvoices.length;
-      if (pageInvoices.length < linkPageSize) break;
+      linksUpdated += res.count;
     }
     console.log(`✅ Inward-Invoice links reconciled: ${linksUpdated}`);
 
@@ -468,7 +464,7 @@ async function main() {
         customerBalances.set(cId, finalBalance);
 
         const vchId = `vch_${inv.id}`;
-        const vchNo = `REC-${String(inv.invoice_no || inv.id).padStart(4, '0')}`;
+        const vchNo = `REC-${String(inv.id).padStart(4, '0')}`;
 
         vouchersToCreate.push({
           id: vchId,

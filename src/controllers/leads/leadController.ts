@@ -194,11 +194,6 @@ export const createLead = async (req: AuthRequest, res: Response) => {
     };
 
     res.status(201).json(mappedLead);
-
-    // Send email notification if next_visit_date is set and email is provided
-    if (mappedLead.nextVisitDate && mappedLead.email) {
-      sendVisitNotification(mappedLead.email, mappedLead.name, mappedLead.company || '', mappedLead.nextVisitDate).catch(console.error);
-    }
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to create lead', detail: error.message });
   }
@@ -214,14 +209,7 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
   if (phone !== undefined && !phone) return res.status(400).json({ error: 'Phone number is mandatory' });
 
   try {
-    // Check existing lead to see if next_visit_date is changing
-    const existingLead = await prisma.lead.findUnique({ where: { id } });
-
     const newNextVisitDate = next_visit_date ? new Date(next_visit_date) : null;
-    const isDateChanged = existingLead && (
-      (!existingLead.next_visit_date && newNextVisitDate) ||
-      (existingLead.next_visit_date && newNextVisitDate && existingLead.next_visit_date.getTime() !== newNextVisitDate.getTime())
-    );
 
     const lead = await prisma.lead.update({
       where: { id },
@@ -252,11 +240,6 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
     };
 
     res.json(mappedLead);
-
-    // Send email notification if next_visit_date is newly set or changed
-    if (isDateChanged && mappedLead.nextVisitDate && mappedLead.email) {
-      sendVisitNotification(mappedLead.email, mappedLead.name, mappedLead.company || '', mappedLead.nextVisitDate).catch(console.error);
-    }
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update lead', detail: error.message });
   }
