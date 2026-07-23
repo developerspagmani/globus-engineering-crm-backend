@@ -112,8 +112,14 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
     // Fetch related records only for the paginated entries to calculate balances
     const inwardIds = entries.map(e => e.id);
+    const dcNos = entries.map(e => e.dc_no ? String(e.dc_no).trim() : '').filter(Boolean);
     const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: { inward_id: { in: inwardIds } }
+      where: { 
+        OR: [
+          { inward_id: { in: inwardIds } },
+          { dc_no: { in: dcNos } }
+        ]
+      }
     });
     const outwards = await prisma.outwardEntry.findMany({
       where: { inward_id: { in: inwardIds } }
@@ -124,14 +130,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       where: { outward_id: { in: outwardIds } }
     });
 
-    // Pre-group invoices and outwards
-    const invoiceGroups = new Map<string, any[]>();
-    invoices.forEach((inv: any) => {
-      const gid = String(inv.inward_id);
-      if (!invoiceGroups.has(gid)) invoiceGroups.set(gid, []);
-      invoiceGroups.get(gid)!.push(inv);
-    });
-
+    // Pre-group outwards
     const outwardGroups = new Map<string, any[]>();
     outwards.forEach((ow: any) => {
       const gid = String(ow.inward_id);
@@ -141,7 +140,12 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
     const parsedEntries = entries.map((e: any) => {
       const items = JSON.parse(e.items_json || '[]');
-      const invoicedForThisEntry = invoiceGroups.get(String(e.id)) || [];
+      const partyId = String(e.customer_id || e.vendor_id || '');
+      const invoicedForThisEntry = invoices.filter((inv: any) => 
+        (inv.inward_id && String(inv.inward_id) === String(e.id)) || 
+        (e.inward_no && inv.inward_no && String(inv.inward_no) === String(e.inward_no)) ||
+        (e.dc_no && inv.dc_no && String(inv.dc_no).trim() === String(e.dc_no).trim() && String(inv.customer_id) === partyId)
+      );
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
 
       // 1. Pre-aggregate quantities by item identifier
@@ -435,9 +439,13 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     // console.log(`[DIAGNOSTIC] Total Inwards found before filter: ${inwards.length}`);
 
     // 2. Get all invoices to calculate balance
+    const dcNos = inwards.map(i => i.dc_no ? String(i.dc_no).trim() : '').filter(Boolean);
     const relatedInvoices = await (prisma as any).legacyInvoice.findMany({
       where: {
-        inward_id: { in: inwards.map(i => i.id) }
+        OR: [
+          { inward_id: { in: inwards.map(i => i.id) } },
+          { dc_no: { in: dcNos } }
+        ]
       }
     });
 
@@ -454,13 +462,6 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     });
 
     // Pre-group for O(1) lookup
-    const invoiceGroups = new Map<string, any[]>();
-    relatedInvoices.forEach((inv: any) => {
-      const gid = String(inv.inward_id);
-      if (!invoiceGroups.has(gid)) invoiceGroups.set(gid, []);
-      invoiceGroups.get(gid)!.push(inv);
-    });
-
     const outwardGroups = new Map<string, any[]>();
     relatedOutwards.forEach((ow: any) => {
       const gid = String(ow.inward_id);
@@ -470,7 +471,12 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
 
     const results = inwards.map(entry => {
       const originalItems = JSON.parse(entry.items_json || '[]');
-      const invoicedForThisEntry = invoiceGroups.get(String(entry.id)) || [];
+      const partyId = String(entry.customer_id || entry.vendor_id || '');
+      const invoicedForThisEntry = relatedInvoices.filter((inv: any) => 
+        (inv.inward_id && String(inv.inward_id) === String(entry.id)) || 
+        (entry.inward_no && inv.inward_no && String(inv.inward_no) === String(entry.inward_no)) ||
+        (entry.dc_no && inv.dc_no && String(inv.dc_no).trim() === String(entry.dc_no).trim() && String(inv.customer_id) === partyId)
+      );
       const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
 
       const invoicedTotals = new Map<string, number>();
