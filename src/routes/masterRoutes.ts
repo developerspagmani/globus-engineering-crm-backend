@@ -80,6 +80,7 @@ router.get('/items', checkPermission('mod_items', 'canRead'), itemController.get
 router.post('/items', checkPermission('mod_items', 'canCreate'), itemController.createItem);
 router.put('/items/:id', checkPermission('mod_items', 'canEdit'), itemController.updateItem);
 router.delete('/items/:id', checkPermission('mod_items', 'canDelete'), itemController.deleteItem);
+router.put('/items/:id/disable', checkPermission('mod_items', 'canDelete'), itemController.softDeleteItem);
 
 // Processes
 router.get('/processes', checkPermission('mod_processes', 'canRead'), processController.getProcesses);

@@ -15,7 +15,14 @@ export const getItems = async (req: Request, res: Response) => {
 
   try {
     const where: any = {
-      AND: []
+      AND: [
+        {
+          OR: [
+            { is_active: true },
+            { is_active: null }
+          ]
+        }
+      ]
     };
 
     if (queryCompanyId) {
@@ -57,6 +64,19 @@ export const getItems = async (req: Request, res: Response) => {
         totalPages: Math.ceil(totalCount / limit)
       }
     });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const softDeleteItem = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    await (prisma as any).item.update({
+      where: { id },
+      data: { is_active: false }
+    });
+    res.json({ success: true, message: 'Item archived successfully' });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
