@@ -111,15 +111,11 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     ]);
 
     // Fetch related records only for the paginated entries to calculate balances
+    // NOTE: We only match by inward_id (UUID) — dc_no is NOT used here because short/numeric dc_nos
+    // (e.g., "9") would match thousands of unrelated invoices across the database.
     const inwardIds = entries.map(e => e.id);
-    const dcNos = entries.map(e => e.dc_no ? String(e.dc_no).trim() : '').filter(Boolean);
     const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: { 
-        OR: [
-          { inward_id: { in: inwardIds } },
-          { dc_no: { in: dcNos } }
-        ]
-      }
+      where: { inward_id: { in: inwardIds } }
     });
     const outwards = await prisma.outwardEntry.findMany({
       where: { inward_id: { in: inwardIds } }
@@ -141,10 +137,11 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     const parsedEntries = entries.map((e: any) => {
       const items = JSON.parse(e.items_json || '[]');
       const partyId = String(e.customer_id || e.vendor_id || '');
+      // Match invoices only by inward_id (UUID) — the only unambiguous identifier.
+      // inward_no and dc_no fallbacks are intentionally removed to prevent false positives
+      // (e.g., a short dc_no like "9" would match thousands of unrelated invoices).
       const invoicedForThisEntry = invoices.filter((inv: any) => 
-        (inv.inward_id && String(inv.inward_id) === String(e.id)) || 
-        (e.inward_no && inv.inward_no && String(inv.inward_no) === String(e.inward_no)) ||
-        (e.dc_no && inv.dc_no && String(inv.dc_no).trim() === String(e.dc_no).trim() && String(inv.customer_id) === partyId)
+        inv.inward_id && String(inv.inward_id) === String(e.id)
       );
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
 
@@ -439,14 +436,11 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     // console.log(`[DIAGNOSTIC] Total Inwards found before filter: ${inwards.length}`);
 
     // 2. Get all invoices to calculate balance
-    const dcNos = inwards.map(i => i.dc_no ? String(i.dc_no).trim() : '').filter(Boolean);
+    // NOTE: We only match by inward_id (UUID) — dc_no is NOT used here because short/numeric dc_nos
+    // (e.g., "9") would match thousands of unrelated invoices across the database, causing
+    // items to appear as fully invoiced when they are not.
     const relatedInvoices = await (prisma as any).legacyInvoice.findMany({
-      where: {
-        OR: [
-          { inward_id: { in: inwards.map(i => i.id) } },
-          { dc_no: { in: dcNos } }
-        ]
-      }
+      where: { inward_id: { in: inwards.map(i => i.id) } }
     });
 
     // 3. Get all related outwards to calculate what's at vendors
@@ -472,10 +466,10 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     const results = inwards.map(entry => {
       const originalItems = JSON.parse(entry.items_json || '[]');
       const partyId = String(entry.customer_id || entry.vendor_id || '');
+      // Match invoices only by inward_id (UUID) — the only unambiguous identifier.
+      // inward_no and dc_no fallbacks are intentionally removed to prevent false positives.
       const invoicedForThisEntry = relatedInvoices.filter((inv: any) => 
-        (inv.inward_id && String(inv.inward_id) === String(entry.id)) || 
-        (entry.inward_no && inv.inward_no && String(inv.inward_no) === String(entry.inward_no)) ||
-        (entry.dc_no && inv.dc_no && String(inv.dc_no).trim() === String(entry.dc_no).trim() && String(inv.customer_id) === partyId)
+        inv.inward_id && String(inv.inward_id) === String(entry.id)
       );
       const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
 
