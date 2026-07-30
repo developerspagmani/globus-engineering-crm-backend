@@ -207,7 +207,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         include: { customer: true },
         skip,
         take: limit,
-        orderBy: sortBy ? { [sortBy]: sortOrder } : [{ invoice_date: 'desc' }, { id: 'desc' }]
+        orderBy: sortBy ? [{ [sortBy]: sortOrder }, { id: 'desc' }] : [{ id: 'desc' }]
       }),
       prisma.legacyInvoice.count({ where: filteredWhere }),
       // Sums use filteredWhere so summary cards update dynamically with active partyType, search, and date filters
