@@ -413,27 +413,40 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     const isWOP = billType === 'Without Process'; // Pure DC/Challan
     const isWP = billType === 'With Process';    // Pure Invoice
 
-    const invNo = (!isWOP && invoiceNumber) 
-      ? parseInt(String(invoiceNumber).replace(/\D/g, '')) 
-      : null;
-      
-    const delNo = (!isWP && req.body.challanNumber) 
-      ? parseInt(String(req.body.challanNumber).replace(/\D/g, '')) 
-      : null;
-
-
-    if (invNo) {
-      const existingInv = await (prisma as any).legacyInvoice.findFirst({
-        where: { invoice_no: invNo, company_id: String(finalCompanyId || '').toLowerCase() }
-      });
-      if (existingInv) return res.status(400).json({ error: `Invoice Number ${invNo} already exists!` });
+    let invNo = null;
+    if (!isWOP) {
+       const lastInv = await (prisma as any).legacyInvoice.findFirst({
+          where: { company_id: String(finalCompanyId), invoice_no: { not: null } },
+          orderBy: { invoice_no: 'desc' },
+          select: { invoice_no: true }
+       });
+       let configNextInvoice = 1;
+       const companyObj = await prisma.company.findUnique({ where: { id: String(finalCompanyId) }});
+       if (companyObj && companyObj.invoice_settings) {
+          try {
+            const settings = JSON.parse(companyObj.invoice_settings);
+            if (settings.nextNumber) configNextInvoice = parseInt(settings.nextNumber) || 1;
+          } catch(e) {}
+       }
+       invNo = Math.max((lastInv?.invoice_no || 0) + 1, configNextInvoice);
     }
-
-    if (delNo) {
-      const existingDel = await (prisma as any).legacyInvoice.findFirst({
-        where: { delivery_no: delNo, company_id: String(finalCompanyId || '').toLowerCase() }
-      });
-      if (existingDel) return res.status(400).json({ error: `Delivery Challan Number ${delNo} already exists!` });
+      
+    let delNo = null;
+    if (!isWP) {
+       const lastDel = await (prisma as any).legacyInvoice.findFirst({
+          where: { company_id: String(finalCompanyId), delivery_no: { not: null } },
+          orderBy: { delivery_no: 'desc' },
+          select: { delivery_no: true }
+       });
+       let configNextChallan = 1;
+       const companyObj = await prisma.company.findUnique({ where: { id: String(finalCompanyId) }});
+       if (companyObj && companyObj.invoice_settings) {
+          try {
+            const settings = JSON.parse(companyObj.invoice_settings);
+            if (settings.nextChallanNumber) configNextChallan = parseInt(settings.nextChallanNumber) || 1;
+          } catch(e) {}
+       }
+       delNo = Math.max((lastDel?.delivery_no || 0) + 1, configNextChallan);
     }
 
     const invoiceData = {
