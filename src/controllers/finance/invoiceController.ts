@@ -87,6 +87,18 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       baseWhere.AND.push({ invoice_date: dateFilter });
     }
 
+    // Process Filter
+    const processFilter = req.query.process as string;
+    console.log('[DEBUG] processFilter:', processFilter);
+    if (processFilter && processFilter !== 'all') {
+      console.log('[DEBUG] Applying process filter:', processFilter);
+      baseWhere.AND.push({
+        items_json: {
+          contains: `"process":"${processFilter}"`
+        }
+      });
+    }
+
 
     // Party Type Filter
     const partyType = req.query.partyType as string;
