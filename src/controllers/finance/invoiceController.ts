@@ -591,7 +591,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
                 } else if (actualChallanNo) {
                     await (tx as any).legacyInvoice.update({
                         where: { id: newInvoice.id },
-                        data: { delivery_no: actualChallanNo }
+                        data: { dc_no: `DC-${actualChallanNo}` }
                     });
                 }
             } else {
