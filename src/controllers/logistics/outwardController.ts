@@ -84,6 +84,7 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : [
           { date: 'desc' },
+          { outward_no: 'desc' },
           { created_at: 'desc' }
         ]
       }),

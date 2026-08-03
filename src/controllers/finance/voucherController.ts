@@ -108,7 +108,10 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: sortBy ? { [sortBy]: sortOrder } : { date: 'desc' }
+        orderBy: sortBy ? { [sortBy]: sortOrder } : [
+          { date: 'desc' },
+          { voucher_no: 'desc' }
+        ]
       }),
       prisma.voucher.count({ where }),
       prisma.voucher.aggregate({

@@ -97,6 +97,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : [
           { date: 'desc' },
+          { inward_no: 'desc' },
           { created_at: 'desc' }
         ]
       }),

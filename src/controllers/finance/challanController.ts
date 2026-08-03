@@ -97,7 +97,11 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
         where,
         skip,
         take: limit,
-        orderBy: sortBy ? { [sortBy]: sortOrder } : { created_at: 'desc' }
+        orderBy: sortBy ? { [sortBy]: sortOrder } : [
+          { date: 'desc' },
+          { challan_no: 'desc' },
+          { created_at: 'desc' }
+        ]
       }),
       prisma.challan.count({ where })
     ]);
