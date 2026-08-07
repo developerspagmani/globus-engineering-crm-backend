@@ -120,6 +120,7 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
     sgst,
     igst,
     roundOff,
+    tds,
     vendorId,
     customerId
   } = req.body;
@@ -136,9 +137,10 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
     const cleanSgst = parseFloat(String(sgst || '0')) || 0;
     const cleanIgst = parseFloat(String(igst || '0')) || 0;
     const cleanRoundOff = parseFloat(String(roundOff || '0')) || 0;
+    const cleanTds = parseFloat(String(tds || '0')) || 0;
     
     // Auto-calculate grand total
-    const cleanGrandTotal = cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff;
+    const cleanGrandTotal = cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff - cleanTds;
 
     const newBill = await prisma.purchaseBill.create({
       data: {
@@ -155,6 +157,7 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
         sgst: cleanSgst,
         igst: cleanIgst,
         round_off: cleanRoundOff,
+        tds: cleanTds,
         grand_total: cleanGrandTotal,
         company_id: String(companyId),
         vendor_id: vendorId || null,
@@ -202,6 +205,7 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
     sgst,
     igst,
     roundOff,
+    tds,
     vendorId,
     customerId
   } = req.body;
@@ -219,9 +223,10 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
     const cleanSgst = sgst !== undefined ? (parseFloat(String(sgst || '0')) || 0) : existing.sgst;
     const cleanIgst = igst !== undefined ? (parseFloat(String(igst || '0')) || 0) : existing.igst;
     const cleanRoundOff = roundOff !== undefined ? (parseFloat(String(roundOff || '0')) || 0) : existing.round_off;
+    const cleanTds = tds !== undefined ? (parseFloat(String(tds || '0')) || 0) : existing.tds;
 
     // Auto-calculate grand total
-    const cleanGrandTotal = cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff;
+    const cleanGrandTotal = cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff - cleanTds;
 
     const updatedBill = await prisma.purchaseBill.update({
       where: { id },
@@ -238,6 +243,7 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
         sgst: cleanSgst,
         igst: cleanIgst,
         round_off: cleanRoundOff,
+        tds: cleanTds,
         grand_total: cleanGrandTotal,
         vendor_id: vendorId !== undefined ? vendorId : existing.vendor_id,
         customer_id: customerId !== undefined ? customerId : existing.customer_id

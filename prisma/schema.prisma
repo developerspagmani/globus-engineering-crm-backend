@@ -801,6 +801,7 @@ model PurchaseBill {
   sgst          Float     @default(0)
   igst          Float     @default(0)
   round_off     Float     @default(0)
+  tds           Float     @default(0)
   grand_total   Float     @default(0)
   company_id    String    @db.VarChar(50)
   created_at    DateTime? @default(now()) @db.Timestamp(0)
