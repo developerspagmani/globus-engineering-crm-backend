@@ -445,11 +445,6 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       
     let delNo = null;
     if (!isWP) {
-       const lastDel = await (prisma as any).legacyInvoice.findFirst({
-          where: { company_id: String(finalCompanyId), delivery_no: { not: null } },
-          orderBy: { delivery_no: 'desc' },
-          select: { delivery_no: true }
-       });
        let configNextChallan = 1;
        const companyObj = await prisma.company.findUnique({ where: { id: String(finalCompanyId) }});
        if (companyObj && companyObj.invoice_settings) {
@@ -458,6 +453,18 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
             if (settings.nextChallanNumber) configNextChallan = parseInt(settings.nextChallanNumber) || 1;
           } catch(e) {}
        }
+
+       // We cap at 8999 to prevent the sequence from jumping to the 9000 invoice series 
+       // in case a crossover occurred in the legacyInvoice table.
+       const lastDel = await (prisma as any).legacyInvoice.findFirst({
+          where: { 
+             company_id: String(finalCompanyId), 
+             delivery_no: { not: null, lt: 9000 } 
+          },
+          orderBy: { delivery_no: 'desc' },
+          select: { delivery_no: true }
+       });
+       
        delNo = Math.max((lastDel?.delivery_no || 0) + 1, configNextChallan);
     }
 
