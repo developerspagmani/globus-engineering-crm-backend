@@ -48,6 +48,11 @@ model LegacyCustomer {
   company_id      String?         @db.VarChar(50)
   app_created_at  DateTime?       @default(now()) @db.Timestamp(0)
   district        String?         @db.VarChar(100)
+  shipping_address String?        @db.Text
+  shipping_city    String?        @db.VarChar(150)
+  shipping_state   String?        @db.VarChar(230)
+  shipping_pin_code Int?
+  shipping_gstin   String?        @db.VarChar(50)
   emailLogs       EmailLog[]
   invoices        LegacyInvoice[]
 
@@ -118,6 +123,9 @@ model LegacyInvoice {
   gstin          String?           @db.VarChar(15)
   state          String?           @db.VarChar(100)
   tax_rate       Float?            @default(12)
+  shipping_address String?         @db.Text
+  shipping_state   String?         @db.VarChar(100)
+  shipping_gstin   String?         @db.VarChar(15)
   reminders      InvoiceReminder[]
   emailLogs      EmailLog[]
   customer       LegacyCustomer?   @relation(fields: [customer_id], references: [id])
@@ -281,6 +289,11 @@ model Vendor {
   vendor_id       String?   @db.VarChar(50)
   vendor_name     String?   @db.VarChar(255)
   vendor_type     String?   @db.VarChar(50)
+  shipping_address String?  @db.Text
+  shipping_city    String?  @db.VarChar(100)
+  shipping_state   String?  @db.VarChar(100)
+  shipping_pin_code String? @db.VarChar(20)
+  shipping_gstin   String?  @db.VarChar(50)
 
   @@map("app_vendors")
 }
@@ -308,6 +321,7 @@ model InwardEntry {
   party_type    String?   @db.VarChar(50)
   outward_id    String?   @db.VarChar(50)
   outward_no    String?   @db.VarChar(50)
+  shipping_address String? @db.Text
 
   @@map("app_inward_entries")
 }
@@ -336,6 +350,7 @@ model OutwardEntry {
   amount            Float?    @default(0)
   coating_name      String?   @db.VarChar(255)
   purpose           String?   @db.VarChar(255)
+  shipping_address  String?   @db.Text
 
   @@map("app_outward_entries")
 }
@@ -739,6 +754,11 @@ model TblCustomer {
   industry        String?   @db.VarChar(100)
   phone           String?   @db.VarChar(50)
   status          String?   @default("active") @db.VarChar(50)
+  shipping_address String?  @db.Text
+  shipping_city    String?  @db.VarChar(150)
+  shipping_state   String?  @db.VarChar(230)
+  shipping_pin_code Int?
+  shipping_gstin   String?  @db.VarChar(50)
 
   @@map("tbl_customer")
 }
@@ -783,6 +803,9 @@ model TblInvoice {
   sub_total      Float?
   tax_rate       Float?    @default(12)
   tax_total      Float?
+  shipping_address String? @db.Text
+  shipping_state   String? @db.VarChar(100)
+  shipping_gstin   String? @db.VarChar(15)
 
   @@map("tbl_invoice")
 }

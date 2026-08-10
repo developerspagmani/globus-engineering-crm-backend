@@ -169,7 +169,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
                   if (grand <= 0 && taxable > 0) grand = taxable + taxVal;
                   const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
                   
-                  const isPending = (grand - paid) > 0.5 || inv.status === 'BILLED';
+                  const isPending = (grand - paid) > 0.5 && grand > 0;
                   const isFrom2025 = inv.invoice_date && new Date(inv.invoice_date) >= cutoffDate;
                   
                   return isPending && isFrom2025;
