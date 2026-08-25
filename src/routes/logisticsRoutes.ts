@@ -25,6 +25,7 @@ router.get('/inward/pending/:customerId', checkPermission('mod_inward', 'canRead
 router.get('/inward/:id', checkPermission('mod_inward', 'canRead') as any, inwardController.getInwardById);
 router.post('/inward', checkPermission('mod_inward', 'canCreate') as any, inwardController.createInwardEntry);
 router.put('/inward/:id', checkPermission('mod_inward', 'canEdit') as any, inwardController.updateInwardEntry);
+router.put('/inward/:id/cancel', checkPermission('mod_inward', 'canEdit') as any, inwardController.cancelInwardEntry);
 router.delete('/inward/:id', checkPermission('mod_inward', 'canDelete') as any, inwardController.deleteInwardEntry);
 
 // Outward Entry

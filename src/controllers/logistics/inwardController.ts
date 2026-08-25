@@ -726,3 +726,48 @@ export const generateDcNo = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to generate DC No', detail: error.message });
   }
 };
+
+export const cancelInwardEntry = async (req: AuthRequest, res: Response) => {
+  const { id } = req.params;
+  const user = req.user;
+  
+  try {
+    const entry = await prisma.inwardEntry.findUnique({ where: { id: String(id) } });
+    if (!entry) return res.status(404).json({ error: 'Inward entry not found' });
+    if (entry.status !== 'pending') return res.status(400).json({ error: 'Only pending inwards can be cancelled' });
+
+    const finalCompanyId = entry.company_id;
+    const prefix = 'CH-CU-';
+    const finalOutwardNo = await generateNextSequence('app_outward_entries', 'outward_no', prefix, finalCompanyId, 2001);
+
+    const outwardEntry = await prisma.outwardEntry.create({
+      data: {
+        id: crypto.randomUUID(),
+        outward_no: finalOutwardNo,
+        party_type: 'customer',
+        customer_id: entry.customer_id,
+        customer_name: entry.customer_name,
+        company_id: finalCompanyId,
+        inward_id: entry.id,
+        inward_no: entry.inward_no,
+        status: 'cancelled',
+        items_json: entry.items_json,
+        date: new Date(),
+        notes: 'Auto-generated for Cancelled Inward'
+      }
+    });
+
+    const updatedInward = await prisma.inwardEntry.update({
+      where: { id: String(id) },
+      data: { 
+        status: 'cancelled',
+        outward_id: outwardEntry.id,
+        outward_no: outwardEntry.outward_no
+      }
+    });
+
+    res.json({ message: 'Inward cancelled successfully', outwardNo: outwardEntry.outward_no });
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to cancel inward', detail: error.message });
+  }
+};
