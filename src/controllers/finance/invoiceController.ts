@@ -459,7 +459,8 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
        const lastDel = await (prisma as any).legacyInvoice.findFirst({
           where: { 
              company_id: String(finalCompanyId), 
-             delivery_no: { not: null, lt: 9000 } 
+             delivery_no: { not: null, lt: 9000 },
+             bill_type: { in: ['without_process', 'both', 'Without Process', 'Both'] }
           },
           orderBy: { delivery_no: 'desc' },
           select: { delivery_no: true }
@@ -1056,7 +1057,8 @@ export const getNextNumbers = async (req: AuthRequest, res: Response) => {
     const lastDel = await (prisma as any).legacyInvoice.findFirst({
       where: { 
         company_id: String(companyId),
-        delivery_no: { not: null }
+        delivery_no: { not: null, lt: 9000 },
+        bill_type: { in: ['without_process', 'both', 'Without Process', 'Both'] }
       },
       orderBy: { delivery_no: 'desc' }
     });
