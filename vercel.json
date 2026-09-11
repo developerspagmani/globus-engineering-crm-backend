@@ -11,5 +11,11 @@
             "src": "/(.*)",
             "dest": "src/index.ts"
         }
+    ],
+    "crons": [
+        {
+            "path": "/api/email-reminder-service",
+            "schedule": "10 7 * * *"
+        }
     ]
 }

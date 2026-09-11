@@ -155,7 +155,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       invoicedForThisEntry.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
         invItems.forEach((ii: any) => {
-          const id = (ii.description || ii.item_name || '').toLowerCase();
+          const id = ii.id !== undefined && ii.id !== null && ii.id !== '' ? String(ii.id) : (ii.description || ii.item_name || '').toLowerCase();
           const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
           invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
         });
@@ -164,7 +164,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       outwardsForThisEntry.forEach((ow: any) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         owItems.forEach((oi: any) => {
-          const id = (oi.description || oi.item_name || '').toLowerCase();
+          const id = oi.id !== undefined && oi.id !== null && oi.id !== '' ? String(oi.id) : (oi.description || oi.item_name || '').toLowerCase();
           const qty = parseFloat(oi.quantity || oi.qty || '0');
           if (ow.party_type === 'vendor') {
             sentToVendorTotals.set(id, (sentToVendorTotals.get(id) || 0) + qty);
@@ -181,7 +181,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       relatedVendorInwards.forEach((vi: any) => {
         const viItems = JSON.parse(vi.items_json || '[]');
         viItems.forEach((vii: any) => {
-          const id = (vii.description || vii.item_name || '').toLowerCase();
+          const id = vii.id !== undefined && vii.id !== null && vii.id !== '' ? String(vii.id) : (vii.description || vii.item_name || '').toLowerCase();
           const qty = parseFloat(vii.quantity || vii.qty || '0');
           returnedFromVendorTotals.set(id, (returnedFromVendorTotals.get(id) || 0) + qty);
         });
@@ -193,7 +193,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
       });
 
-      const balanceItems = items.map((item: any) => {
+      const balanceItems = items.map((item: any, idx: number) => {
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
         const originalQty = parseFloat(item.quantity || item.qty || '0');
 
@@ -202,9 +202,15 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         const isLast = currentCount === 1;
 
         const consume = (pool: Map<string, number>, max: number) => {
-          const available = pool.get(itemIdentifier) || 0;
+          const idStrById = String(idx);
+          let available = pool.get(idStrById);
+          let keyUsed = idStrById;
+          if (available === undefined) {
+             available = pool.get(itemIdentifier) || 0;
+             keyUsed = itemIdentifier;
+          }
           const consumed = isLast ? available : Math.min(available, max);
-          pool.set(itemIdentifier, available - consumed);
+          pool.set(keyUsed, available - consumed);
           return consumed;
         };
 
@@ -482,7 +488,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       invoicedForThisEntry.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
         invItems.forEach((ii: any) => {
-          const id = (ii.description || ii.item_name || '').toLowerCase();
+          const id = ii.id !== undefined && ii.id !== null && ii.id !== '' ? String(ii.id) : (ii.description || ii.item_name || '').toLowerCase();
           const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
           invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
         });
@@ -491,7 +497,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       outwardsForThisEntry.forEach((ow: any) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         owItems.forEach((oi: any) => {
-          const id = (oi.description || oi.item_name || '').toLowerCase();
+          const id = oi.id !== undefined && oi.id !== null && oi.id !== '' ? String(oi.id) : (oi.description || oi.item_name || '').toLowerCase();
           const qty = parseFloat(oi.quantity || oi.qty || '0');
           if (ow.party_type === 'vendor') {
             sentToVendorTotals.set(id, (sentToVendorTotals.get(id) || 0) + qty);
@@ -508,7 +514,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       vendorInwardsForThisCustomer.forEach((vi: any) => {
         const viItems = JSON.parse(vi.items_json || '[]');
         viItems.forEach((vii: any) => {
-          const id = (vii.description || vii.item_name || '').toLowerCase();
+          const id = vii.id !== undefined && vii.id !== null && vii.id !== '' ? String(vii.id) : (vii.description || vii.item_name || '').toLowerCase();
           const qty = parseFloat(vii.quantity || vii.qty || '0');
           returnedFromVendorTotals.set(id, (returnedFromVendorTotals.get(id) || 0) + qty);
         });
@@ -520,7 +526,7 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
       });
 
-      const balanceItems = originalItems.map((item: any) => {
+      const balanceItems = originalItems.map((item: any, idx: number) => {
         const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
         const original = parseFloat(item.quantity || item.qty || '0');
 
@@ -529,9 +535,15 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         const isLast = currentCount === 1;
 
         const consume = (pool: Map<string, number>, max: number) => {
-          const available = pool.get(itemIdentifier) || 0;
+          const idStrById = String(idx);
+          let available = pool.get(idStrById);
+          let keyUsed = idStrById;
+          if (available === undefined) {
+             available = pool.get(itemIdentifier) || 0;
+             keyUsed = itemIdentifier;
+          }
           const consumed = isLast ? available : Math.min(available, max);
-          pool.set(itemIdentifier, available - consumed);
+          pool.set(keyUsed, available - consumed);
           return consumed;
         };
 
@@ -634,7 +646,7 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     invoices.forEach((inv: any) => {
       const invItems = JSON.parse(inv.items_json || '[]');
       invItems.forEach((ii: any) => {
-        const id = (ii.description || ii.item_name || '').toLowerCase();
+        const id = ii.id !== undefined && ii.id !== null && ii.id !== '' ? String(ii.id) : (ii.description || ii.item_name || '').toLowerCase();
         const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
         invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
       });
@@ -643,7 +655,7 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     outwards.forEach((ow: any) => {
       const owItems = JSON.parse(ow.items_json || '[]');
       owItems.forEach((oi: any) => {
-        const id = (oi.description || oi.item_name || '').toLowerCase();
+        const id = oi.id !== undefined && oi.id !== null && oi.id !== '' ? String(oi.id) : (oi.description || oi.item_name || '').toLowerCase();
         const qty = parseFloat(oi.quantity || oi.qty || '0');
         if (ow.party_type !== 'vendor') {
            dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
@@ -657,7 +669,7 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
     });
 
-    const balanceItems = items.map((item: any) => {
+    const balanceItems = items.map((item: any, idx: number) => {
       const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
       const originalQty = parseFloat(item.quantity || item.qty || '0');
 
@@ -666,9 +678,15 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       const isLast = currentCount === 1;
 
       const consume = (pool: Map<string, number>, max: number) => {
-        const available = pool.get(itemIdentifier) || 0;
+        const idStrById = String(idx);
+        let available = pool.get(idStrById);
+        let keyUsed = idStrById;
+        if (available === undefined) {
+           available = pool.get(itemIdentifier) || 0;
+           keyUsed = itemIdentifier;
+        }
         const consumed = isLast ? available : Math.min(available, max);
-        pool.set(itemIdentifier, available - consumed);
+        pool.set(keyUsed, available - consumed);
         return consumed;
       };
 
