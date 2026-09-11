@@ -361,8 +361,11 @@ export const processLeadVisitReminders = async (companyId?: string) => {
 
     let sentCount = 0;
 
-    for (const lead of leads) {
+        for (const lead of leads) {
       if (!lead.agent_id) continue;
+
+      const visitDateStr = lead.next_visit_date ? new Date(lead.next_visit_date).toLocaleDateString('en-GB') : 'Tomorrow';
+      const reminderUniqueKey = `lead_visit_${lead.id}_${visitDateStr}`;
 
       const milestoneAlreadySent = await prisma.emailLog.findFirst({
         where: {
@@ -376,8 +379,6 @@ export const processLeadVisitReminders = async (companyId?: string) => {
       });
 
       if (!salesPerson || !salesPerson.email) continue;
-
-      const visitDateStr = lead.next_visit_date ? new Date(lead.next_visit_date).toLocaleDateString('en-GB') : 'Tomorrow';
 
       const subject = `[Reminder] Upcoming Lead Visit Tomorrow - ${lead.name}`;
       const body = `Dear ${salesPerson.name || 'Sales Representative'},
@@ -405,7 +406,7 @@ Globus Engineering System`;
           data: {
             invoiceId: 0,
             customerId: 0,
-            reminderType: `lead_visit_${lead.id}`,
+            reminderType: reminderUniqueKey,
             emailSent: new Date(),
             recipientEmail: salesPerson.email,
             status: 'sent'
