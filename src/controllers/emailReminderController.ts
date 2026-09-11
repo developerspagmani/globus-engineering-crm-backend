@@ -334,15 +334,20 @@ export const processEmailReminders = async (req: Request, res: Response) => {
 
 export const processLeadVisitReminders = async (companyId?: string) => {
   try {
+    // Vercel runs in UTC. Users are in IST (UTC+5:30).
+    // A date set as "tomorrow" in IST (e.g. 2026-09-12 IST) is stored as
+    // 2026-09-11T18:30:00Z in UTC — which falls BEFORE UTC's tomorrow.
+    // So we widen the search window: from today 00:00 UTC to day-after-tomorrow 23:59 UTC
+    // to safely catch all IST "tomorrow" dates.
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const startOfTomorrow = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 0, 0, 0, 0);
-    const endOfTomorrow = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate(), 23, 59, 59, 999);
+    const startWindow = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate() - 1, 0, 0, 0, 0); // today 00:00 UTC
+    const endWindow = new Date(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate() + 1, 23, 59, 59, 999); // day-after-tomorrow 23:59 UTC
 
     const whereLead: any = {
       next_visit_date: {
-        gte: startOfTomorrow,
-        lte: endOfTomorrow
+        gte: startWindow,
+        lte: endWindow
       }
     };
 
@@ -361,7 +366,7 @@ export const processLeadVisitReminders = async (companyId?: string) => {
 
       const milestoneAlreadySent = await prisma.emailLog.findFirst({
         where: {
-          reminderType: `lead_visit_${lead.id}`
+          reminderType: reminderUniqueKey
         }
       });
       if (milestoneAlreadySent) continue;
