@@ -181,13 +181,22 @@ export const processEmailReminders = async (req: Request, res: Response) => {
           
           const emailContent = generateEmailContent(invoice);
           
-          // Get reach email from customer record
-          const customerEmail = invoice.customer?.email_id1 || 
+          // Get email from customer record only — do NOT generate fake emails
+          const rawCustomerEmail = invoice.customer?.email_id1 || 
                                invoice.customer?.email_id2 || 
                                invoice.customer?.email || 
-                               (invoice.customer_name ? `${invoice.customer_name.toLowerCase().replace(/\s+/g, '.')}@gmail.com` : null);
-          
-          if (!customerEmail) continue;
+                               null;
+
+          // Validate email format before sending
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          const customerEmail = rawCustomerEmail && emailRegex.test(rawCustomerEmail.trim()) 
+            ? rawCustomerEmail.trim() 
+            : null;
+
+          if (!customerEmail) {
+            console.log(`⚠️ Skipping invoice ${invoice.invoice_no} — no valid email for customer "${invoice.customer_name || 'Unknown'}"`);
+            continue;
+          }
           
           const resolvedCustomerName = cleanStr(invoice.customer_name) || cleanStr(invoice.customer?.customer_name) || 'N/A';
           
