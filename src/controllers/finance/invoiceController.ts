@@ -397,13 +397,12 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     invoiceNumber, date, dueDate, customerId, customerName,
     address, subTotal, grandTotal, items, billType, inwardId, inward_no, company_id, companyId, notes,
     po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate,
-    vehicleNo, vehicle_no
-  } = req.body;
+    vehicleNo, vehicle_no, other_charges, other_charges_desc, taxTotal, tax_total } = req.body;
 
   const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18'));
   const finalSubTotal = parseFloat(String(subTotal || '0'));
   const finalGrandTotal = parseFloat(String(grandTotal || '0'));
-  const finalTaxTotal = finalGrandTotal - finalSubTotal;
+  const finalTaxTotal = taxTotal !== undefined ? parseFloat(String(taxTotal)) : (tax_total !== undefined ? parseFloat(String(tax_total)) : (finalGrandTotal - finalSubTotal));
 
   // Ghost Trap: Block 0.00 invoices from background triggers
   // Exception: Allow 0.00 amount for "Without Process" (WOP) or "Both" (in case only WOP items are present)
@@ -480,6 +479,9 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       total: String(subTotal || '0'),
       sub_total: finalSubTotal,
       grand_total: String(grandTotal || '0'),
+      discount: discount !== undefined ? String(discount) : undefined,
+      other_charges: other_charges !== undefined ? parseFloat(String(other_charges)) : undefined,
+      other_charges_desc: other_charges_desc !== undefined ? String(other_charges_desc) : undefined,
       items_json: JSON.stringify(items || []),
       bill_type: billType === 'With Process' ? 'with_process' :
         billType === 'Without Process' ? 'without_process' :
@@ -742,8 +744,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
     date, dueDate, customerId, customerName,
-    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state, tax_rate, taxRate
-  } = req.body;
+    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state, tax_rate, taxRate, other_charges, other_charges_desc, taxTotal, tax_total, discount } = req.body;
 
   const finalTaxRate = tax_rate || taxRate ? parseFloat(String(tax_rate || taxRate)) : undefined;
   const finalSubTotal = subTotal ? parseFloat(String(subTotal)) : undefined;
@@ -751,7 +752,7 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
 
   let taxUpdate: any = {};
   if (finalGrandTotal !== undefined && finalSubTotal !== undefined) {
-    const finalTaxTotal = finalGrandTotal - finalSubTotal;
+    const finalTaxTotal = taxTotal !== undefined ? parseFloat(String(taxTotal)) : (tax_total !== undefined ? parseFloat(String(tax_total)) : (finalGrandTotal - finalSubTotal));
     const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
     const currentRate = finalTaxRate || 12;
 
@@ -834,6 +835,9 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             total: subTotal ? String(subTotal) : undefined,
             sub_total: finalSubTotal !== undefined ? finalSubTotal : undefined,
             grand_total: grandTotal ? String(grandTotal) : undefined,
+            discount: discount !== undefined ? String(discount) : undefined,
+            other_charges: other_charges !== undefined ? parseFloat(String(other_charges)) : undefined,
+            other_charges_desc: other_charges_desc !== undefined ? String(other_charges_desc) : undefined,
             items_json: items ? JSON.stringify(items) : undefined,
             bill_type: billType === 'With Process' ? 'with_process' :
               billType === 'Without Process' ? 'without_process' :
