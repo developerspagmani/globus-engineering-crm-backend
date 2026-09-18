@@ -392,19 +392,19 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const createInvoice = async (req: AuthRequest, res: Response) => {
+export const createInvoice = async (req: AuthRequest, res: Response) => {
   const {
     invoiceNumber, date, dueDate, customerId, customerName,
     address, subTotal, grandTotal, items, billType, inwardId, inward_no, company_id, companyId, notes,
     po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate,
-    vehicleNo, vehicle_no, other_charges, other_charges_desc, taxTotal, tax_total } = req.body;
+    vehicleNo, vehicle_no, other_charges, other_charges_desc, taxTotal, tax_total, discount } = req.body;
 
   const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18'));
   const finalSubTotal = parseFloat(String(subTotal || '0'));
   const finalGrandTotal = parseFloat(String(grandTotal || '0'));
   const finalTaxTotal = taxTotal !== undefined ? parseFloat(String(taxTotal)) : (tax_total !== undefined ? parseFloat(String(tax_total)) : (finalGrandTotal - finalSubTotal));
 
-  // Ghost Trap: Block 0.00 invoices from background triggers
+
   // Exception: Allow 0.00 amount for "Without Process" (WOP) or "Both" (in case only WOP items are present)
   const isWOP = String(billType || '').toLowerCase().includes('without') || String(billType || '').toLowerCase() === 'both';
   if (!isWOP && (!finalGrandTotal || finalGrandTotal <= 0)) {
