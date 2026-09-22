@@ -472,12 +472,14 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const createInvoice = async (req: AuthRequest, res: Response) => {
+
+export const createInvoice = async (req: AuthRequest, res: Response) => {
   const {
     invoiceNumber, date, dueDate, customerId, customerName,
     address, subTotal, grandTotal, items, billType, inwardId, inward_no, company_id, companyId, notes,
     po_no, po_date, dc_no, dc_date, poNo, poDate, dcNo, dcDate, gstin, state, tax_rate, taxRate,
-    vehicleNo, vehicle_no, other_charges, other_charges_desc, taxTotal, tax_total, discount } = req.body;
+    vehicleNo, vehicle_no, other_charges, other_charges_desc, taxTotal, tax_total, discount,
+    shippingName, shipping_name, shippingAddress, shipping_address, shippingState, shipping_state, shippingGstin, shipping_gstin } = req.body;
 
   const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18'));
   const finalSubTotal = parseFloat(String(subTotal || '0'));
@@ -584,6 +586,10 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       po_date: (po_date || poDate) ? new Date(po_date || poDate) : null,
       dc_no: dc_no || dcNo,
       dc_date: (dc_date || dcDate) ? new Date(dc_date || dcDate) : null,
+      shipping_name: shippingName || shipping_name || null,
+      shipping_address: shippingAddress || shipping_address || null,
+      shipping_state: shippingState || shipping_state || null,
+      shipping_gstin: shippingGstin || shipping_gstin || null,
     };
 
     const invoice = await withRetry(async () => {
@@ -824,7 +830,8 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   const {
     date, dueDate, customerId, customerName,
-    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state, tax_rate, taxRate, other_charges, other_charges_desc, taxTotal, tax_total, discount } = req.body;
+    address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state, tax_rate, taxRate, other_charges, other_charges_desc, taxTotal, tax_total, discount,
+    shippingName, shipping_name, shippingAddress, shipping_address, shippingState, shipping_state, shippingGstin, shipping_gstin } = req.body;
 
   const finalTaxRate = tax_rate || taxRate ? parseFloat(String(tax_rate || taxRate)) : undefined;
   const finalSubTotal = subTotal ? parseFloat(String(subTotal)) : undefined;
@@ -927,6 +934,10 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             po_date: (req.body.po_date || req.body.poDate) ? new Date(req.body.po_date || req.body.poDate) : undefined,
             dc_no: req.body.dc_no || req.body.dcNo,
             dc_date: (req.body.dc_date || req.body.dcDate) ? new Date(req.body.dc_date || req.body.dcDate) : undefined,
+            shipping_name: shippingName || shipping_name !== undefined ? (shippingName || shipping_name) : undefined,
+            shipping_address: shippingAddress || shipping_address !== undefined ? (shippingAddress || shipping_address) : undefined,
+            shipping_state: shippingState || shipping_state !== undefined ? (shippingState || shipping_state) : undefined,
+            shipping_gstin: shippingGstin || shipping_gstin !== undefined ? (shippingGstin || shipping_gstin) : undefined,
             status: status?.toUpperCase(),
             gstin: gstin,
             state: state,
