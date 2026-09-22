@@ -280,7 +280,9 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     });
 
     const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
-    const finalEntries = parsedEntries;
+    const finalEntries = isInvoiceScreen 
+      ? parsedEntries.filter((e: any) => e.items.some((item: any) => item.billingBalance > 0))
+      : parsedEntries;
 
     res.json({
       items: finalEntries,
