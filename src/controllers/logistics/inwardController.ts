@@ -203,14 +203,28 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
         const consume = (pool: Map<string, number>, max: number) => {
           const idStrById = String(idx);
-          let available = pool.get(idStrById);
-          let keyUsed = idStrById;
-          if (available === undefined) {
-             available = pool.get(itemIdentifier) || 0;
-             keyUsed = itemIdentifier;
+          let availableById = pool.get(idStrById) || 0;
+          let availableByName = pool.get(itemIdentifier) || 0;
+          
+          if (idStrById === itemIdentifier) {
+              availableByName = 0;
           }
-          const consumed = isLast ? available : Math.min(available, max);
-          pool.set(keyUsed, available - consumed);
+          
+          let totalAvailable = availableById + availableByName;
+          const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
+          
+          let toDeduct = consumed;
+          if (availableById > 0) {
+             const deductId = Math.min(availableById, toDeduct);
+             pool.set(idStrById, availableById - deductId);
+             toDeduct -= deductId;
+          }
+          if (availableByName > 0 && toDeduct > 0) {
+             const deductName = Math.min(availableByName, toDeduct);
+             pool.set(itemIdentifier, availableByName - deductName);
+             toDeduct -= deductName;
+          }
+          
           return consumed;
         };
 
@@ -536,14 +550,28 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
 
         const consume = (pool: Map<string, number>, max: number) => {
           const idStrById = String(idx);
-          let available = pool.get(idStrById);
-          let keyUsed = idStrById;
-          if (available === undefined) {
-             available = pool.get(itemIdentifier) || 0;
-             keyUsed = itemIdentifier;
+          let availableById = pool.get(idStrById) || 0;
+          let availableByName = pool.get(itemIdentifier) || 0;
+          
+          if (idStrById === itemIdentifier) {
+              availableByName = 0;
           }
-          const consumed = isLast ? available : Math.min(available, max);
-          pool.set(keyUsed, available - consumed);
+          
+          let totalAvailable = availableById + availableByName;
+          const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
+          
+          let toDeduct = consumed;
+          if (availableById > 0) {
+             const deductId = Math.min(availableById, toDeduct);
+             pool.set(idStrById, availableById - deductId);
+             toDeduct -= deductId;
+          }
+          if (availableByName > 0 && toDeduct > 0) {
+             const deductName = Math.min(availableByName, toDeduct);
+             pool.set(itemIdentifier, availableByName - deductName);
+             toDeduct -= deductName;
+          }
+          
           return consumed;
         };
 
@@ -679,14 +707,28 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
 
       const consume = (pool: Map<string, number>, max: number) => {
         const idStrById = String(idx);
-        let available = pool.get(idStrById);
-        let keyUsed = idStrById;
-        if (available === undefined) {
-           available = pool.get(itemIdentifier) || 0;
-           keyUsed = itemIdentifier;
+        let availableById = pool.get(idStrById) || 0;
+        let availableByName = pool.get(itemIdentifier) || 0;
+        
+        if (idStrById === itemIdentifier) {
+            availableByName = 0;
         }
-        const consumed = isLast ? available : Math.min(available, max);
-        pool.set(keyUsed, available - consumed);
+        
+        let totalAvailable = availableById + availableByName;
+        const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
+        
+        let toDeduct = consumed;
+        if (availableById > 0) {
+           const deductId = Math.min(availableById, toDeduct);
+           pool.set(idStrById, availableById - deductId);
+           toDeduct -= deductId;
+        }
+        if (availableByName > 0 && toDeduct > 0) {
+           const deductName = Math.min(availableByName, toDeduct);
+           pool.set(itemIdentifier, availableByName - deductName);
+           toDeduct -= deductName;
+        }
+        
         return consumed;
       };
 

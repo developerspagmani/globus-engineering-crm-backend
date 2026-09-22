@@ -294,18 +294,98 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         gstin: inv.gstin || '',
         state: inv.state || '',
         status: inv.status || 'DRAFT',
-        taxTotal: parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0,
-        taxRate: parseFloat(String(inv.tax_rate || '0').replace(/[^\d.]/g, '')) || 0,
+        taxTotal: (() => {
+            let t = parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (t === 0 && gt > 0 && st > 0) t = Math.max(0, gt - st - oc);
+            return t;
+        })(),
+        taxRate: (() => {
+            let r = parseFloat(String(inv.tax_rate || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (r === 0 && gt > 0 && st > 0) {
+               const t = Math.max(0, gt - st - oc);
+               if (t > 0) r = Math.round((t / st) * 100);
+            }
+            return r;
+        })(),
         inwardId: inv.inward_id,
         inward_id: inv.inward_id,
         inwardNo: inv.inward_no,
         inward_no: inv.inward_no,
-        gst1: inv.gst1,
-        gst2: inv.gst2,
-        igst: inv.igst,
-        gst1_per: inv.gst1_per,
-        gst2_per: inv.gst2_per,
-        igst_per: inv.igst_per
+        gst1: (() => {
+            let t = parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (t === 0 && gt > 0 && st > 0) t = Math.max(0, gt - st - oc);
+            const isIntra = (inv.state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+            if (isIntra && t > 0 && (!inv.gst1 || inv.gst1 === '0' || inv.gst1 === '0.00')) return String(t / 2);
+            return inv.gst1;
+        })(),
+        gst2: (() => {
+            let t = parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (t === 0 && gt > 0 && st > 0) t = Math.max(0, gt - st - oc);
+            const isIntra = (inv.state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+            if (isIntra && t > 0 && (!inv.gst2 || inv.gst2 === '0' || inv.gst2 === '0.00')) return String(t / 2);
+            return inv.gst2;
+        })(),
+        igst: (() => {
+            let t = parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (t === 0 && gt > 0 && st > 0) t = Math.max(0, gt - st - oc);
+            const isIntra = (inv.state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+            if (!isIntra && t > 0 && (!inv.igst || inv.igst === '0' || inv.igst === '0.00')) return String(t);
+            return inv.igst;
+        })(),
+        gst1_per: (() => {
+            let r = parseFloat(String(inv.tax_rate || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (r === 0 && gt > 0 && st > 0) {
+               const t = Math.max(0, gt - st - oc);
+               if (t > 0) r = Math.round((t / st) * 100);
+            }
+            const isIntra = (inv.state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+            if (isIntra && r > 0 && (!inv.gst1_per || inv.gst1_per === '0' || inv.gst1_per === '0.00')) return String(r / 2);
+            return inv.gst1_per;
+        })(),
+        gst2_per: (() => {
+            let r = parseFloat(String(inv.tax_rate || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (r === 0 && gt > 0 && st > 0) {
+               const t = Math.max(0, gt - st - oc);
+               if (t > 0) r = Math.round((t / st) * 100);
+            }
+            const isIntra = (inv.state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+            if (isIntra && r > 0 && (!inv.gst2_per || inv.gst2_per === '0' || inv.gst2_per === '0.00')) return String(r / 2);
+            return inv.gst2_per;
+        })(),
+        igst_per: (() => {
+            let r = parseFloat(String(inv.tax_rate || '0').replace(/[^\d.]/g, '')) || 0;
+            const gt = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+            const st = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+            const oc = parseFloat(String(inv.other_charges || '0').replace(/[^\d.]/g, '')) || 0;
+            if (r === 0 && gt > 0 && st > 0) {
+               const t = Math.max(0, gt - st - oc);
+               if (t > 0) r = Math.round((t / st) * 100);
+            }
+            const isIntra = (inv.state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+            if (!isIntra && r > 0 && (!inv.igst_per || inv.igst_per === '0' || inv.igst_per === '0.00')) return String(r);
+            return inv.igst_per;
+        })()
       };
 
       if (rawInvoiceNos && mapped.inwardId) {
