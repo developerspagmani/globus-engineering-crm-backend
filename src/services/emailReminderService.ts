@@ -1,5 +1,5 @@
 import cron from 'node-cron';
-import axios from 'axios';
+import { runScheduledInvoiceReminders, processLeadVisitReminders } from '../controllers/emailReminderController';
 
 class EmailReminderService {
   private static instance: EmailReminderService;
@@ -17,22 +17,31 @@ class EmailReminderService {
   public startCronJob() {
     if (this.isRunning) return;
     
-    // Run every day at 12:40 PM
-    cron.schedule('40 12 * * *', async () => {
-      console.log('⏰ Running scheduled email reminder check...');
+    // Run daily at 10:00 AM (business morning) and 12:40 PM
+    cron.schedule('0 10 * * *', async () => {
+      console.log('⏰ Running morning scheduled email reminder check (10:00 AM)...');
       try {
-        // We can call the controller logic directly or via an internal request
-        // For simplicity and to avoid circular deps, we can just trigger the endpoint
-        const port = process.env.PORT || 4000;
-        await axios.get(`http://localhost:${port}/api/email-reminder-service`);
-        console.log('✅ Scheduled reminder check completed.');
+        const invRes = await runScheduledInvoiceReminders();
+        const leadCount = await processLeadVisitReminders();
+        console.log(`✅ Morning reminder check complete: ${invRes.sentCount} invoice reminders, ${leadCount} lead reminders sent.`);
       } catch (error) {
-        console.error('❌ Scheduled reminder check failed:', error);
+        console.error('❌ Morning scheduled reminder check failed:', error);
+      }
+    });
+
+    cron.schedule('40 12 * * *', async () => {
+      console.log('⏰ Running afternoon scheduled email reminder check (12:40 PM)...');
+      try {
+        const invRes = await runScheduledInvoiceReminders();
+        const leadCount = await processLeadVisitReminders();
+        console.log(`✅ Afternoon reminder check complete: ${invRes.sentCount} invoice reminders, ${leadCount} lead reminders sent.`);
+      } catch (error) {
+        console.error('❌ Afternoon scheduled reminder check failed:', error);
       }
     });
 
     this.isRunning = true;
-    console.log('🚀 Email reminder cron job started (Daily at 12:40 PM)');
+    console.log('🚀 Email reminder cron job active (Daily at 10:00 AM and 12:40 PM)');
   }
 }
 

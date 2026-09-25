@@ -3,41 +3,34 @@ import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import { sendSingleLeadVisitReminder } from '../emailReminderController';
+import { getCompanyTransporter } from '../../utils/email';
 
-async function sendVisitNotification(leadEmail: string, leadName: string, companyName: string, visitDate: Date) {
-  if (!process.env.SMTP_HOST) {
-    console.error('SMTP_HOST not defined, skipping visit notification email.');
+async function sendVisitNotification(leadEmail: string, leadName: string, companyName: string, visitDate: Date, companyId?: string | null) {
+  const { transporter, fromName, fromEmail, source } = await getCompanyTransporter(companyId);
+  if (!transporter) {
+    console.error('❌ Cannot send visit notification email: SMTP is not configured in Settings or .env');
     return;
   }
-  
-  const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT || '587'),
-    secure: process.env.SMTP_PORT === '465',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
 
-  const subject = `Upcoming Visit Scheduled - Globus Engineering`;
+  const subject = `Upcoming Visit Scheduled - ${fromName}`;
   const body = `Dear ${leadName},
 
-This is to kindly inform you that a representative from Globus Engineering is scheduled to visit your company, ${companyName || 'your office'}, on ${visitDate.toLocaleDateString()}.
+This is to kindly inform you that a representative from ${fromName} is scheduled to visit your company, ${companyName || 'your office'}, on ${visitDate.toLocaleDateString()}.
 
 We look forward to meeting with you to discuss how we can support your engineering needs. If you need to reschedule, please let us know.
 
 Best regards,
-Globus Engineering Team`;
+${fromName} Team`;
 
   try {
     await transporter.sendMail({
-      from: `"${process.env.FROM_NAME || 'Globus Engineering'}" <${process.env.FROM_EMAIL || 'noreply@globusengineering.com'}>`,
-      to: 'rdhanushkumarramalingam@gmail.com', // HARDCODED FOR TESTING
+      from: `"${fromName}" <${fromEmail}>`,
+      to: leadEmail,
       subject,
       text: body
     });
-    console.log(`✅ Visit notification sent to rdhanushkumarramalingam@gmail.com (Original: ${leadEmail})`);
+    console.log(`✅ Visit notification sent to ${leadEmail} (Source: ${source})`);
   } catch (err) {
     console.error('❌ Failed to send lead visit email:', err);
   }
@@ -129,16 +122,33 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
       prisma.lead.count({ where })
     ]);
 
+    // Fetch assigned sales person details for these leads
+    const agentIds = Array.from(new Set(leads.map(l => l.agent_id).filter(Boolean))) as string[];
+    let agentMap = new Map<string, any>();
+    if (agentIds.length > 0) {
+      const agents = await prisma.user.findMany({
+        where: { id: { in: agentIds } },
+        select: { id: true, name: true, email: true, phone: true }
+      });
+      agentMap = new Map(agents.map(a => [a.id, a]));
+    }
+
     // Map snake_case from DB to camelCase for Frontend
-    const mappedLeads = leads.map(l => ({
-      ...l,
-      agentId: l.agent_id,
-      companyId: l.company_id,
-      assignedArea: l.assigned_area,
-      createdAt: l.created_at,
-      nextVisitDate: l.next_visit_date,
-      productInterest: l.product_interest
-    }));
+    const mappedLeads = leads.map(l => {
+      const agent = l.agent_id ? agentMap.get(l.agent_id) : null;
+      return {
+        ...l,
+        agentId: l.agent_id,
+        agentName: agent?.name || null,
+        agentEmail: agent?.email || null,
+        agentPhone: agent?.phone || null,
+        companyId: l.company_id,
+        assignedArea: l.assigned_area,
+        createdAt: l.created_at,
+        nextVisitDate: l.next_visit_date,
+        productInterest: l.product_interest
+      };
+    });
 
     res.json({
       items: mappedLeads,
@@ -254,3 +264,17 @@ export const deleteLead = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to delete lead', detail: error.message });
   }
 };
+
+// Manually send lead visit reminder to the assigned sales person on demand
+export const sendLeadVisitReminder = async (req: AuthRequest, res: Response) => {
+  try {
+    const { id } = req.params;
+    const companyId = req.user?.company_id || undefined;
+    const result = await sendSingleLeadVisitReminder(id as string, companyId);
+    res.json(result);
+  } catch (err: any) {
+    console.error('Error in sendLeadVisitReminder:', err);
+    res.status(400).json({ error: err.message || 'Failed to send visit reminder' });
+  }
+};
+

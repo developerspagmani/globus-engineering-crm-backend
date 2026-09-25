@@ -19,6 +19,7 @@ router.get('/leads', checkPermission('mod_lead', 'canRead') as any, leadControll
 router.post('/leads', checkPermission('mod_lead', 'canCreate') as any, leadController.createLead);
 router.put('/leads/:id', checkPermission('mod_lead', 'canEdit') as any, leadController.updateLead);
 router.delete('/leads/:id', checkPermission('mod_lead', 'canDelete') as any, leadController.deleteLead);
+router.post('/leads/:id/send-visit-reminder', leadController.sendLeadVisitReminder);
 
 // Deals (Split into dealController)
 router.get('/deals', checkPermission('mod_sales_hub', 'canRead') as any, dealController.getAllDeals);

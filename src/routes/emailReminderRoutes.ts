@@ -9,6 +9,14 @@ router.get('/invoices/:id/reminder-status', emailReminderController.getReminderS
 // Update reminder toggle status for an invoice
 router.put('/invoices/:id/reminder-status', emailReminderController.updateReminderStatus);
 
+// Manually send an invoice reminder email on demand
+router.post('/invoices/:id/send-reminder', emailReminderController.sendInvoiceReminder);
+
+// SMTP & Mail Configuration
+router.get('/settings/mail', emailReminderController.getMailSettings);
+router.put('/settings/mail', emailReminderController.updateMailSettings);
+router.post('/settings/mail/test', emailReminderController.testMailSettings);
+
 // Manually trigger reminder processing (useful for testing or manual runs)
 router.get('/email-reminder-service', emailReminderController.processEmailReminders);
 

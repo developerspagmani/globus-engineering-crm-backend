@@ -34,7 +34,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   // If we are in "Selection" mode (ids provided) OR the frontend requests a large batch (usually 100 for dropdowns), 
   // we expand the limit to 5000 to ensure the user sees all 200+ records in one view.
   let limit = requestedLimit || 10;
-  if (rawInvoiceNos || requestedLimit === 100 || req.query.type === 'selection') {
+  if (rawInvoiceNos || requestedLimit === 100 || req.query.type === 'selection' || req.query.id) {
     limit = 5000;
   }
   const skip = (page - 1) * limit;
@@ -57,21 +57,46 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       baseWhere.AND.push({ id: -1 }); 
     }
 
+    const id = (req.query.id || req.query.invoice_id) as string;
+    if (id) {
+      const parsedId = parseInt(id);
+      if (!isNaN(parsedId)) {
+        baseWhere.AND.push({ id: parsedId });
+      }
+    }
+
     const customerId = (req.query.customer_id || req.query.customerId) as string;
     if (customerId) {
       baseWhere.AND.push({ customer_id: parseInt(customerId) });
     }
 
-    // Search Filter
+    // Search Filter - Exact Match
     if (search) {
+      const rawSearch = (req.query.search as string || '').trim();
+      const parsedNum = parseInt(rawSearch, 10);
+
+      const exactConditions: any[] = [
+        { customer_name: { equals: rawSearch } },
+        { dc_no: { equals: rawSearch } },
+        { po_no: { equals: rawSearch } }
+      ];
+
+      if (!isNaN(parsedNum)) {
+        exactConditions.push({ invoice_no: parsedNum });
+        exactConditions.push({ delivery_no: parsedNum });
+        exactConditions.push({ id: parsedNum });
+      }
+
+      if (rawSearch.toUpperCase().startsWith('INV-')) {
+        const invNum = parseInt(rawSearch.slice(4), 10);
+        if (!isNaN(invNum)) {
+          exactConditions.push({ invoice_no: invNum });
+          exactConditions.push({ id: invNum });
+        }
+      }
+
       baseWhere.AND.push({
-        OR: [
-          { customer_name: { contains: search.toLowerCase() } },
-          { customer_name: { contains: search.toUpperCase() } },
-          { dc_no: { contains: search.toLowerCase() } },
-          { dc_no: { contains: search.toUpperCase() } },
-          ...(!isNaN(parseInt(search)) ? [{ invoice_no: parseInt(search) }] : [])
-        ]
+        OR: exactConditions
       });
     }
 
@@ -89,9 +114,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
 
     // Process Filter
     const processFilter = req.query.process as string;
-    console.log('[DEBUG] processFilter:', processFilter);
     if (processFilter && processFilter !== 'all') {
-      console.log('[DEBUG] Applying process filter:', processFilter);
       baseWhere.AND.push({
         items_json: {
           contains: `"process":"${processFilter}"`
@@ -398,8 +421,28 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
                  const inwardItems = JSON.parse(inward.items_json);
 
                  // Sum quantities from ALL OTHER invoices (exclude current invoice)
+                 const searchIds = [mapped.inwardId];
+                 if (inward.inward_no) {
+                   searchIds.push(String(inward.inward_no));
+                   searchIds.push(`inw_${inward.inward_no}`);
+                 }
+                 const orConditions: any[] = [{ inward_id: { in: searchIds } }];
+                 if (inward.inward_no && !isNaN(parseInt(String(inward.inward_no), 10))) {
+                   orConditions.push({ inward_no: parseInt(String(inward.inward_no), 10) });
+                 }
+                 if (inward.dc_no && inward.customer_id && !isNaN(parseInt(String(inward.customer_id), 10))) {
+                   orConditions.push({
+                     dc_no: String(inward.dc_no).trim(),
+                     customer_id: parseInt(String(inward.customer_id), 10)
+                   });
+                 }
                  const otherInvoices = await prisma.legacyInvoice.findMany({
-                     where: { inward_id: mapped.inwardId, id: { not: inv.id } }
+                     where: {
+                       AND: [
+                         { id: { not: inv.id } },
+                         { OR: orConditions }
+                       ]
+                     }
                  });
                  
                  const billedByOthers: Record<string, number> = {};
@@ -617,9 +660,30 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
           if (entry) {
             const originalItems = JSON.parse(entry.items_json || '[]');
             const inwardIdStr = String(inwardId);
-            
-            const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
-            const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+            const searchIds = [inwardIdStr];
+            if (entry.inward_no) {
+              searchIds.push(String(entry.inward_no));
+              searchIds.push(`inw_${entry.inward_no}`);
+            }
+            const invoiceOr: any[] = [{ inward_id: { in: searchIds } }];
+            if (entry.inward_no && !isNaN(parseInt(String(entry.inward_no), 10))) {
+              invoiceOr.push({ inward_no: parseInt(String(entry.inward_no), 10) });
+            }
+            if (entry.dc_no && entry.customer_id && !isNaN(parseInt(String(entry.customer_id), 10))) {
+              invoiceOr.push({
+                dc_no: String(entry.dc_no).trim(),
+                customer_id: parseInt(String(entry.customer_id), 10)
+              });
+            }
+            const allInvoices = await tx.legacyInvoice.findMany({ where: { OR: invoiceOr } });
+            const allOutwards = await tx.outwardEntry.findMany({
+              where: {
+                OR: [
+                  { inward_id: { in: searchIds } },
+                  { inward_no: { in: searchIds } }
+                ]
+              }
+            });
             
             const billedMap = new Map<string, number>();
             const dispatchedMap = new Map<string, number>();
@@ -880,8 +944,28 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
           if (inwardForValidation && inwardForValidation.items_json) {
             const inwardItemsForValidation = JSON.parse(inwardForValidation.items_json);
             // Get billed qty from all OTHER invoices (exclude current being updated)
+            const searchIds = [String(effectiveInwardIdForValidation)];
+            if (inwardForValidation.inward_no) {
+              searchIds.push(String(inwardForValidation.inward_no));
+              searchIds.push(`inw_${inwardForValidation.inward_no}`);
+            }
+            const orConds: any[] = [{ inward_id: { in: searchIds } }];
+            if (inwardForValidation.inward_no && !isNaN(parseInt(String(inwardForValidation.inward_no), 10))) {
+              orConds.push({ inward_no: parseInt(String(inwardForValidation.inward_no), 10) });
+            }
+            if (inwardForValidation.dc_no && inwardForValidation.customer_id && !isNaN(parseInt(String(inwardForValidation.customer_id), 10))) {
+              orConds.push({
+                dc_no: String(inwardForValidation.dc_no).trim(),
+                customer_id: parseInt(String(inwardForValidation.customer_id), 10)
+              });
+            }
             const otherInvsForValidation = await tx.legacyInvoice.findMany({
-              where: { inward_id: String(effectiveInwardIdForValidation), id: { not: invoiceIdNum } }
+              where: {
+                AND: [
+                  { id: { not: invoiceIdNum } },
+                  { OR: orConds }
+                ]
+              }
             });
             const billedByOthersValidation: Record<string, number> = {};
             otherInvsForValidation.forEach((oi: any) => {

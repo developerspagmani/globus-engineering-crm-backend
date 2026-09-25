@@ -39,6 +39,12 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    const id = (req.query.id || req.query.inward_id) as string;
+    if (id) {
+      where.AND.push({ id: String(id) });
+      limit = 5000;
+    }
+
     if (search) {
       where.AND.push({
         OR: [
@@ -114,9 +120,33 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     // Fetch related records only for the paginated entries to calculate balances
     // NOTE: We only match by inward_id (UUID) — dc_no is NOT used here because short/numeric dc_nos
     // (e.g., "9") would match thousands of unrelated invoices across the database.
-    const inwardIds = entries.map(e => e.id);
+    const inwardIds = entries.map(e => String(e.id));
+    const inwardNos = entries.map(e => String(e.inward_no || '')).filter(Boolean);
+    const inwardFormattedIds = inwardNos.map(n => `inw_${n}`);
+    const allSearchIds = Array.from(new Set([...inwardIds, ...inwardNos, ...inwardFormattedIds]));
+    const numericInwNos = inwardNos.map(n => parseInt(n)).filter(n => !isNaN(n));
+
+    // Also match by dc_no + customer_id for legacy invoices where inward_no was corrupted/missing
+    const dcCustomerConditions = entries
+      .filter(e => e.dc_no && e.customer_id)
+      .map(e => ({
+        dc_no: String(e.dc_no).trim(),
+        customer_id: parseInt(String(e.customer_id), 10)
+      }))
+      .filter(c => c.dc_no && !isNaN(c.customer_id));
+
+    const invoiceQueryOR: any[] = [
+      { inward_id: { in: allSearchIds } },
+      { inward_no: { in: numericInwNos } }
+    ];
+    if (dcCustomerConditions.length > 0) {
+      invoiceQueryOR.push(...dcCustomerConditions);
+    }
+
     const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: { inward_id: { in: inwardIds } }
+      where: {
+        OR: invoiceQueryOR
+      }
     });
     const outwards = await prisma.outwardEntry.findMany({
       where: { inward_id: { in: inwardIds } }
@@ -138,12 +168,29 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     const parsedEntries = entries.map((e: any) => {
       const items = JSON.parse(e.items_json || '[]');
       const partyId = String(e.customer_id || e.vendor_id || '');
-      // Match invoices only by inward_id (UUID) — the only unambiguous identifier.
-      // inward_no and dc_no fallbacks are intentionally removed to prevent false positives
-      // (e.g., a short dc_no like "9" would match thousands of unrelated invoices).
-      const invoicedForThisEntry = invoices.filter((inv: any) => 
-        inv.inward_id && String(inv.inward_id) === String(e.id)
-      );
+      
+      const entryId = String(e.id || '').toLowerCase().trim();
+      const entryNo = String(e.inward_no || '').toLowerCase().trim();
+      const invoicedForThisEntry = invoices.filter((inv: any) => {
+        if (inv.inward_id) {
+          const invInwId = String(inv.inward_id).toLowerCase().trim();
+          if (invInwId === entryId || invInwId === entryNo || invInwId === `inw_${entryNo}`) {
+            return true;
+          }
+        }
+        if (inv.inward_no && entryNo && String(inv.inward_no) === entryNo) {
+          if (!inv.customer_id || !e.customer_id || String(inv.customer_id) === String(e.customer_id)) {
+            return true;
+          }
+        }
+        // Match by DC No and Customer ID for invoices where inward_no was not set to inward ID
+        if (e.dc_no && inv.dc_no && String(e.dc_no).trim().toLowerCase() === String(inv.dc_no).trim().toLowerCase()) {
+          if (e.customer_id && inv.customer_id && String(e.customer_id) === String(inv.customer_id)) {
+            return true;
+          }
+        }
+        return false;
+      });
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
 
       // 1. Pre-aggregate quantities by item identifier
@@ -154,22 +201,34 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
 
       invoicedForThisEntry.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
-        invItems.forEach((ii: any) => {
-          const id = ii.id !== undefined && ii.id !== null && ii.id !== '' ? String(ii.id) : (ii.description || ii.item_name || '').toLowerCase();
+        invItems.forEach((ii: any, iIdx: number) => {
           const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
-          invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
+          const cleanName = String(ii.description || ii.item_name || '').toLowerCase().trim();
+          if (cleanName) {
+            invoicedTotals.set(cleanName, (invoicedTotals.get(cleanName) || 0) + qty);
+          }
+          if (ii.id !== undefined && ii.id !== null && ii.id !== '') {
+            const strId = String(ii.id);
+            invoicedTotals.set(strId, (invoicedTotals.get(strId) || 0) + qty);
+          }
         });
       });
 
       outwardsForThisEntry.forEach((ow: any) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         owItems.forEach((oi: any) => {
-          const id = oi.id !== undefined && oi.id !== null && oi.id !== '' ? String(oi.id) : (oi.description || oi.item_name || '').toLowerCase();
           const qty = parseFloat(oi.quantity || oi.qty || '0');
+          const cleanName = String(oi.description || oi.item_name || '').toLowerCase().trim();
           if (ow.party_type === 'vendor') {
-            sentToVendorTotals.set(id, (sentToVendorTotals.get(id) || 0) + qty);
+            if (cleanName) sentToVendorTotals.set(cleanName, (sentToVendorTotals.get(cleanName) || 0) + qty);
+            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
+              sentToVendorTotals.set(String(oi.id), (sentToVendorTotals.get(String(oi.id)) || 0) + qty);
+            }
           } else {
-            dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
+            if (cleanName) dispatchedTotals.set(cleanName, (dispatchedTotals.get(cleanName) || 0) + qty);
+            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
+              dispatchedTotals.set(String(oi.id), (dispatchedTotals.get(String(oi.id)) || 0) + qty);
+            }
           }
         });
       });
@@ -181,20 +240,23 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       relatedVendorInwards.forEach((vi: any) => {
         const viItems = JSON.parse(vi.items_json || '[]');
         viItems.forEach((vii: any) => {
-          const id = vii.id !== undefined && vii.id !== null && vii.id !== '' ? String(vii.id) : (vii.description || vii.item_name || '').toLowerCase();
+          const cleanName = String(vii.description || vii.item_name || '').toLowerCase().trim();
           const qty = parseFloat(vii.quantity || vii.qty || '0');
-          returnedFromVendorTotals.set(id, (returnedFromVendorTotals.get(id) || 0) + qty);
+          if (cleanName) returnedFromVendorTotals.set(cleanName, (returnedFromVendorTotals.get(cleanName) || 0) + qty);
+          if (vii.id !== undefined && vii.id !== null && vii.id !== '') {
+            returnedFromVendorTotals.set(String(vii.id), (returnedFromVendorTotals.get(String(vii.id)) || 0) + qty);
+          }
         });
       });
 
       const itemCounts = new Map<string, number>();
       items.forEach((item: any) => {
-        const id = (item.description || item.item_name || '').toLowerCase();
+        const id = String(item.description || item.item_name || '').toLowerCase().trim();
         itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
       });
 
       const balanceItems = items.map((item: any, idx: number) => {
-        const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
+        const itemIdentifier = String(item.description || item.item_name || '').toLowerCase().trim();
         const originalQty = parseFloat(item.quantity || item.qty || '0');
 
         const currentCount = itemCounts.get(itemIdentifier) || 0;
@@ -202,27 +264,22 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         const isLast = currentCount === 1;
 
         const consume = (pool: Map<string, number>, max: number) => {
-          const idStrById = String(idx);
-          let availableById = pool.get(idStrById) || 0;
-          let availableByName = pool.get(itemIdentifier) || 0;
+          let availableByName = itemIdentifier ? (pool.get(itemIdentifier) || 0) : 0;
+          let availableById = (!itemIdentifier || availableByName === 0) ? (pool.get(String(idx)) || 0) : 0;
           
-          if (idStrById === itemIdentifier) {
-              availableByName = 0;
-          }
-          
-          let totalAvailable = availableById + availableByName;
+          let totalAvailable = availableByName > 0 ? availableByName : availableById;
           const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
           
           let toDeduct = consumed;
-          if (availableById > 0) {
-             const deductId = Math.min(availableById, toDeduct);
-             pool.set(idStrById, availableById - deductId);
-             toDeduct -= deductId;
+          if (availableByName > 0) {
+            const deduct = Math.min(availableByName, toDeduct);
+            pool.set(itemIdentifier, availableByName - deduct);
+            toDeduct -= deduct;
           }
-          if (availableByName > 0 && toDeduct > 0) {
-             const deductName = Math.min(availableByName, toDeduct);
-             pool.set(itemIdentifier, availableByName - deductName);
-             toDeduct -= deductName;
+          if (toDeduct > 0 && availableById > 0) {
+            const deduct = Math.min(availableById, toDeduct);
+            pool.set(String(idx), availableById - deduct);
+            toDeduct -= deduct;
           }
           
           return consumed;
@@ -462,14 +519,31 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     // NOTE: We only match by inward_id (UUID) — dc_no is NOT used here because short/numeric dc_nos
     // (e.g., "9") would match thousands of unrelated invoices across the database, causing
     // items to appear as fully invoiced when they are not.
+    const inwardIds = inwards.map(i => String(i.id));
+    const inwardNos = inwards.map(i => String(i.inward_no || '')).filter(Boolean);
+    const inwardFormattedIds = inwardNos.map(n => `inw_${n}`);
+    const allSearchIds = Array.from(new Set([...inwardIds, ...inwardNos, ...inwardFormattedIds]));
+    const numericInwNos = inwardNos.map(n => parseInt(n)).filter(n => !isNaN(n));
+
+    const numCustId = parseInt(customerId, 10);
+    const invoiceQueryConditions: any[] = [
+      { inward_id: { in: allSearchIds } },
+      { inward_no: { in: numericInwNos } }
+    ];
+    if (!isNaN(numCustId)) {
+      invoiceQueryConditions.push({ customer_id: numCustId });
+    }
+
     const relatedInvoices = await (prisma as any).legacyInvoice.findMany({
-      where: { inward_id: { in: inwards.map(i => i.id) } }
+      where: {
+        OR: invoiceQueryConditions
+      }
     });
 
     // 3. Get all related outwards to calculate what's at vendors
     const relatedOutwards = await prisma.outwardEntry.findMany({
       where: {
-        inward_id: { in: inwards.map(i => i.id) }
+        inward_id: { in: inwardIds }
       }
     });
 
@@ -489,11 +563,29 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
     const results = inwards.map(entry => {
       const originalItems = JSON.parse(entry.items_json || '[]');
       const partyId = String(entry.customer_id || entry.vendor_id || '');
-      // Match invoices only by inward_id (UUID) — the only unambiguous identifier.
-      // inward_no and dc_no fallbacks are intentionally removed to prevent false positives.
-      const invoicedForThisEntry = relatedInvoices.filter((inv: any) => 
-        inv.inward_id && String(inv.inward_id) === String(entry.id)
-      );
+      
+      const entryId = String(entry.id || '').toLowerCase().trim();
+      const entryNo = String(entry.inward_no || '').toLowerCase().trim();
+      const invoicedForThisEntry = relatedInvoices.filter((inv: any) => {
+        if (inv.inward_id) {
+          const invInwId = String(inv.inward_id).toLowerCase().trim();
+          if (invInwId === entryId || invInwId === entryNo || invInwId === `inw_${entryNo}`) {
+            return true;
+          }
+        }
+        if (inv.inward_no && entryNo && String(inv.inward_no) === entryNo) {
+          if (!inv.customer_id || !entry.customer_id || String(inv.customer_id) === String(entry.customer_id)) {
+            return true;
+          }
+        }
+        // Match by DC No and Customer ID for invoices where inward_no was not set to inward ID
+        if (entry.dc_no && inv.dc_no && String(entry.dc_no).trim().toLowerCase() === String(inv.dc_no).trim().toLowerCase()) {
+          if (entry.customer_id && inv.customer_id && String(entry.customer_id) === String(inv.customer_id)) {
+            return true;
+          }
+        }
+        return false;
+      });
       const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
 
       const invoicedTotals = new Map<string, number>();
@@ -503,22 +595,34 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
 
       invoicedForThisEntry.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
-        invItems.forEach((ii: any) => {
-          const id = ii.id !== undefined && ii.id !== null && ii.id !== '' ? String(ii.id) : (ii.description || ii.item_name || '').toLowerCase();
+        invItems.forEach((ii: any, iIdx: number) => {
           const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
-          invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
+          const cleanName = String(ii.description || ii.item_name || '').toLowerCase().trim();
+          if (cleanName) {
+            invoicedTotals.set(cleanName, (invoicedTotals.get(cleanName) || 0) + qty);
+          }
+          if (ii.id !== undefined && ii.id !== null && ii.id !== '') {
+            const strId = String(ii.id);
+            invoicedTotals.set(strId, (invoicedTotals.get(strId) || 0) + qty);
+          }
         });
       });
 
       outwardsForThisEntry.forEach((ow: any) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         owItems.forEach((oi: any) => {
-          const id = oi.id !== undefined && oi.id !== null && oi.id !== '' ? String(oi.id) : (oi.description || oi.item_name || '').toLowerCase();
           const qty = parseFloat(oi.quantity || oi.qty || '0');
+          const cleanName = String(oi.description || oi.item_name || '').toLowerCase().trim();
           if (ow.party_type === 'vendor') {
-            sentToVendorTotals.set(id, (sentToVendorTotals.get(id) || 0) + qty);
+            if (cleanName) sentToVendorTotals.set(cleanName, (sentToVendorTotals.get(cleanName) || 0) + qty);
+            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
+              sentToVendorTotals.set(String(oi.id), (sentToVendorTotals.get(String(oi.id)) || 0) + qty);
+            }
           } else {
-            dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
+            if (cleanName) dispatchedTotals.set(cleanName, (dispatchedTotals.get(cleanName) || 0) + qty);
+            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
+              dispatchedTotals.set(String(oi.id), (dispatchedTotals.get(String(oi.id)) || 0) + qty);
+            }
           }
         });
       });
@@ -530,20 +634,23 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       vendorInwardsForThisCustomer.forEach((vi: any) => {
         const viItems = JSON.parse(vi.items_json || '[]');
         viItems.forEach((vii: any) => {
-          const id = vii.id !== undefined && vii.id !== null && vii.id !== '' ? String(vii.id) : (vii.description || vii.item_name || '').toLowerCase();
+          const cleanName = String(vii.description || vii.item_name || '').toLowerCase().trim();
           const qty = parseFloat(vii.quantity || vii.qty || '0');
-          returnedFromVendorTotals.set(id, (returnedFromVendorTotals.get(id) || 0) + qty);
+          if (cleanName) returnedFromVendorTotals.set(cleanName, (returnedFromVendorTotals.get(cleanName) || 0) + qty);
+          if (vii.id !== undefined && vii.id !== null && vii.id !== '') {
+            returnedFromVendorTotals.set(String(vii.id), (returnedFromVendorTotals.get(String(vii.id)) || 0) + qty);
+          }
         });
       });
 
       const itemCounts = new Map<string, number>();
       originalItems.forEach((item: any) => {
-        const id = (item.description || item.item_name || '').toLowerCase();
+        const id = String(item.description || item.item_name || '').toLowerCase().trim();
         itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
       });
 
       const balanceItems = originalItems.map((item: any, idx: number) => {
-        const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
+        const itemIdentifier = String(item.description || item.item_name || '').toLowerCase().trim();
         const original = parseFloat(item.quantity || item.qty || '0');
 
         const currentCount = itemCounts.get(itemIdentifier) || 0;
@@ -551,27 +658,22 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         const isLast = currentCount === 1;
 
         const consume = (pool: Map<string, number>, max: number) => {
-          const idStrById = String(idx);
-          let availableById = pool.get(idStrById) || 0;
-          let availableByName = pool.get(itemIdentifier) || 0;
+          let availableByName = itemIdentifier ? (pool.get(itemIdentifier) || 0) : 0;
+          let availableById = (!itemIdentifier || availableByName === 0) ? (pool.get(String(idx)) || 0) : 0;
           
-          if (idStrById === itemIdentifier) {
-              availableByName = 0;
-          }
-          
-          let totalAvailable = availableById + availableByName;
+          let totalAvailable = availableByName > 0 ? availableByName : availableById;
           const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
           
           let toDeduct = consumed;
-          if (availableById > 0) {
-             const deductId = Math.min(availableById, toDeduct);
-             pool.set(idStrById, availableById - deductId);
-             toDeduct -= deductId;
+          if (availableByName > 0) {
+            const deduct = Math.min(availableByName, toDeduct);
+            pool.set(itemIdentifier, availableByName - deduct);
+            toDeduct -= deduct;
           }
-          if (availableByName > 0 && toDeduct > 0) {
-             const deductName = Math.min(availableByName, toDeduct);
-             pool.set(itemIdentifier, availableByName - deductName);
-             toDeduct -= deductName;
+          if (toDeduct > 0 && availableById > 0) {
+            const deduct = Math.min(availableById, toDeduct);
+            pool.set(String(idx), availableById - deduct);
+            toDeduct -= deduct;
           }
           
           return consumed;
@@ -603,30 +705,40 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         };
       });
 
-      const isInvoiceScreen = req.query.purpose === 'invoice' || req.query.type === 'invoice' || String(req.headers.referer || '').includes('invoice');
-      
-      let hasBalance = false;
-      if (isInvoiceScreen) {
-        hasBalance = balanceItems.some((item: any) => item.billingBalance > 0);
-      } else {
-        hasBalance = balanceItems.some((item: any) => item.remainingQty > 0);
-      }
-      
-      // console.log(`[DIAGNOSTIC] Inward #${entry.inward_no}: hasBalance=${hasBalance}, Items=${balanceItems.length}`);
+      const isCompleted = (entry.status || '').toLowerCase() === 'completed';
+      const hasBillingBalance = balanceItems.some((item: any) => (item.billingBalance || 0) > 0);
+      const hasBalance = !isCompleted && hasBillingBalance;
 
       return {
         id: entry.id,
         inward_no: entry.inward_no,
+        inwardNo: entry.inward_no,
+        customer_id: entry.customer_id,
+        customerId: entry.customer_id,
         customerName: entry.customer_name,
+        customer_name: entry.customer_name,
+        vendor_id: entry.vendor_id,
+        vendorId: entry.vendor_id,
         vendorName: entry.vendor_name,
+        vendor_name: entry.vendor_name,
+        partyType: entry.party_type,
+        party_type: entry.party_type,
         date: entry.date,
         po_reference: entry.po_reference,
+        poReference: entry.po_reference,
         po_date: entry.po_date,
+        poDate: entry.po_date,
+        challan_no: entry.challan_no,
+        challanNo: entry.challan_no,
         dc_no: entry.dc_no,
+        dcNo: entry.dc_no,
         dc_date: entry.dc_date,
+        dcDate: entry.dc_date,
         due_date: entry.due_date,
+        dueDate: entry.due_date,
         status: entry.status,
         items: balanceItems,
+        totalRemaining: balanceItems.reduce((acc: number, cur: any) => acc + (cur.billingBalance || 0), 0),
         hasBalance
       };
     }).filter(r => r.hasBalance);
@@ -662,45 +774,132 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     // Parse items
     const items = JSON.parse(entry.items_json || '[]');
 
+    const entryId = String(entry.id || '').toLowerCase().trim();
+    const entryNo = String(entry.inward_no || '').toLowerCase().trim();
+
     // Calculate balances
-    const invoices = await (prisma as any).legacyInvoice.findMany({
-      where: { inward_id: String(entry.id) }
-    });
-    const outwards = await prisma.outwardEntry.findMany({
-      where: { inward_id: String(entry.id) }
-    });
+    const invoiceConditions: any[] = [{ inward_id: String(entry.id) }];
+    if (entryNo) {
+      invoiceConditions.push({ inward_id: entryNo });
+      invoiceConditions.push({ inward_id: `inw_${entryNo}` });
+      const numNo = parseInt(entryNo, 10);
+      if (!isNaN(numNo)) {
+        invoiceConditions.push({ inward_no: numNo });
+      }
+    }
+    if (entry.dc_no && entry.customer_id) {
+      const numCust = parseInt(String(entry.customer_id), 10);
+      if (!isNaN(numCust)) {
+        invoiceConditions.push({
+          dc_no: String(entry.dc_no).trim(),
+          customer_id: numCust
+        });
+      }
+    }
+
+    const outwardConditions: any[] = [{ inward_id: String(entry.id) }];
+    if (entryNo) {
+      outwardConditions.push({ inward_id: entryNo });
+      outwardConditions.push({ inward_id: `inw_${entryNo}` });
+    }
+
+    const [invoices, outwards, allReturnedInwards] = await Promise.all([
+      (prisma as any).legacyInvoice.findMany({
+        where: { OR: invoiceConditions }
+      }),
+      prisma.outwardEntry.findMany({
+        where: { OR: outwardConditions }
+      }),
+      prisma.inwardEntry.findMany({
+        where: {
+          party_type: 'vendor',
+          outward_id: { not: null }
+        }
+      })
+    ]);
 
     const invoicedTotals = new Map<string, number>();
     const dispatchedTotals = new Map<string, number>();
+    const sentToVendorTotals = new Map<string, number>();
+    const returnedFromVendorTotals = new Map<string, number>();
 
     invoices.forEach((inv: any) => {
+      let matchesThisEntry = false;
+      if (inv.inward_id) {
+        const invInwId = String(inv.inward_id).toLowerCase().trim();
+        if (invInwId === entryId || invInwId === entryNo || invInwId === `inw_${entryNo}`) {
+          matchesThisEntry = true;
+        }
+      }
+      if (!matchesThisEntry && inv.inward_no && entryNo && String(inv.inward_no) === entryNo) {
+        if (!inv.customer_id || !entry.customer_id || String(inv.customer_id) === String(entry.customer_id)) {
+          matchesThisEntry = true;
+        }
+      }
+      if (!matchesThisEntry && entry.dc_no && inv.dc_no && String(entry.dc_no).trim().toLowerCase() === String(inv.dc_no).trim().toLowerCase()) {
+        if (entry.customer_id && inv.customer_id && String(entry.customer_id) === String(inv.customer_id)) {
+          matchesThisEntry = true;
+        }
+      }
+      if (!matchesThisEntry) return;
+
       const invItems = JSON.parse(inv.items_json || '[]');
       invItems.forEach((ii: any) => {
-        const id = ii.id !== undefined && ii.id !== null && ii.id !== '' ? String(ii.id) : (ii.description || ii.item_name || '').toLowerCase();
         const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
-        invoicedTotals.set(id, (invoicedTotals.get(id) || 0) + qty);
+        const cleanName = String(ii.description || ii.item_name || '').toLowerCase().trim();
+        if (cleanName) {
+          invoicedTotals.set(cleanName, (invoicedTotals.get(cleanName) || 0) + qty);
+        }
+        if (ii.id !== undefined && ii.id !== null && ii.id !== '') {
+          const strId = String(ii.id);
+          invoicedTotals.set(strId, (invoicedTotals.get(strId) || 0) + qty);
+        }
       });
     });
 
     outwards.forEach((ow: any) => {
       const owItems = JSON.parse(ow.items_json || '[]');
       owItems.forEach((oi: any) => {
-        const id = oi.id !== undefined && oi.id !== null && oi.id !== '' ? String(oi.id) : (oi.description || oi.item_name || '').toLowerCase();
         const qty = parseFloat(oi.quantity || oi.qty || '0');
-        if (ow.party_type !== 'vendor') {
-           dispatchedTotals.set(id, (dispatchedTotals.get(id) || 0) + qty);
+        const cleanName = String(oi.description || oi.item_name || '').toLowerCase().trim();
+        if (ow.party_type === 'vendor') {
+          if (cleanName) sentToVendorTotals.set(cleanName, (sentToVendorTotals.get(cleanName) || 0) + qty);
+          if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
+            sentToVendorTotals.set(String(oi.id), (sentToVendorTotals.get(String(oi.id)) || 0) + qty);
+          }
+        } else {
+          if (cleanName) dispatchedTotals.set(cleanName, (dispatchedTotals.get(cleanName) || 0) + qty);
+          if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
+            dispatchedTotals.set(String(oi.id), (dispatchedTotals.get(String(oi.id)) || 0) + qty);
+          }
+        }
+      });
+    });
+
+    const relatedVendorInwards = allReturnedInwards.filter((ei: any) => 
+      ei.party_type === 'vendor' && outwards.some((ow: any) => String(ow.id) === String(ei.outward_id))
+    );
+
+    relatedVendorInwards.forEach((vi: any) => {
+      const viItems = JSON.parse(vi.items_json || '[]');
+      viItems.forEach((vii: any) => {
+        const cleanName = String(vii.description || vii.item_name || '').toLowerCase().trim();
+        const qty = parseFloat(vii.quantity || vii.qty || '0');
+        if (cleanName) returnedFromVendorTotals.set(cleanName, (returnedFromVendorTotals.get(cleanName) || 0) + qty);
+        if (vii.id !== undefined && vii.id !== null && vii.id !== '') {
+          returnedFromVendorTotals.set(String(vii.id), (returnedFromVendorTotals.get(String(vii.id)) || 0) + qty);
         }
       });
     });
 
     const itemCounts = new Map<string, number>();
     items.forEach((item: any) => {
-      const id = (item.description || item.item_name || '').toLowerCase();
+      const id = String(item.description || item.item_name || '').toLowerCase().trim();
       itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
     });
 
     const balanceItems = items.map((item: any, idx: number) => {
-      const itemIdentifier = (item.description || item.item_name || '').toLowerCase();
+      const itemIdentifier = String(item.description || item.item_name || '').toLowerCase().trim();
       const originalQty = parseFloat(item.quantity || item.qty || '0');
 
       const currentCount = itemCounts.get(itemIdentifier) || 0;
@@ -708,27 +907,22 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       const isLast = currentCount === 1;
 
       const consume = (pool: Map<string, number>, max: number) => {
-        const idStrById = String(idx);
-        let availableById = pool.get(idStrById) || 0;
-        let availableByName = pool.get(itemIdentifier) || 0;
+        let availableByName = itemIdentifier ? (pool.get(itemIdentifier) || 0) : 0;
+        let availableById = (!itemIdentifier || availableByName === 0) ? (pool.get(String(idx)) || 0) : 0;
         
-        if (idStrById === itemIdentifier) {
-            availableByName = 0;
-        }
-        
-        let totalAvailable = availableById + availableByName;
+        let totalAvailable = availableByName > 0 ? availableByName : availableById;
         const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
         
         let toDeduct = consumed;
-        if (availableById > 0) {
-           const deductId = Math.min(availableById, toDeduct);
-           pool.set(idStrById, availableById - deductId);
-           toDeduct -= deductId;
+        if (availableByName > 0) {
+          const deduct = Math.min(availableByName, toDeduct);
+          pool.set(itemIdentifier, availableByName - deduct);
+          toDeduct -= deduct;
         }
-        if (availableByName > 0 && toDeduct > 0) {
-           const deductName = Math.min(availableByName, toDeduct);
-           pool.set(itemIdentifier, availableByName - deductName);
-           toDeduct -= deductName;
+        if (toDeduct > 0 && availableById > 0) {
+          const deduct = Math.min(availableById, toDeduct);
+          pool.set(String(idx), availableById - deduct);
+          toDeduct -= deduct;
         }
         
         return consumed;
@@ -736,18 +930,27 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
 
       const totalInvoiced = consume(invoicedTotals, originalQty);
       const totalDispatched = consume(dispatchedTotals, originalQty);
+      const totalSentToVendor = consume(sentToVendorTotals, originalQty);
+      const totalReturnedFromVendor = consume(returnedFromVendorTotals, originalQty);
+
+      const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
 
       const billingBalance = Math.max(0, originalQty - totalInvoiced);
-      const dispatchBalance = Math.max(0, originalQty - totalDispatched); // Simplified for direct customer return
+      const vendorWorkBalance = Math.max(0, billingBalance - currentlyAtVendor);
+      const dispatchBalance = Math.max(0, originalQty - totalDispatched - currentlyAtVendor);
 
       return {
         ...item,
         originalQty,
         invoicedQty: totalInvoiced,
         dispatchedQty: totalDispatched,
+        atVendorQty: currentlyAtVendor,
+        returnedQty: totalReturnedFromVendor,
         billingBalance: billingBalance,
+        vendorWorkBalance: vendorWorkBalance,
         dispatchBalance: dispatchBalance,
-        remainingQty: Math.max(billingBalance, dispatchBalance)
+        remainingQty: Math.max(billingBalance, dispatchBalance),
+        inHouseQty: dispatchBalance
       };
     });
 

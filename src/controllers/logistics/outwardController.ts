@@ -191,8 +191,30 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
         const inward = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
         if (inward) {
           const originalItems = JSON.parse(inward.items_json || '[]');
-          const allInvoices = await (tx as any).legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
-          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+          const searchIds = [inwardIdStr];
+          if (inward.inward_no) {
+            searchIds.push(String(inward.inward_no));
+            searchIds.push(`inw_${inward.inward_no}`);
+          }
+          const invoiceOr: any[] = [{ inward_id: { in: searchIds } }];
+          if (inward.inward_no && !isNaN(parseInt(String(inward.inward_no), 10))) {
+            invoiceOr.push({ inward_no: parseInt(String(inward.inward_no), 10) });
+          }
+          if (inward.dc_no && inward.customer_id && !isNaN(parseInt(String(inward.customer_id), 10))) {
+            invoiceOr.push({
+              dc_no: String(inward.dc_no).trim(),
+              customer_id: parseInt(String(inward.customer_id), 10)
+            });
+          }
+          const allInvoices = await (tx as any).legacyInvoice.findMany({ where: { OR: invoiceOr } });
+          const allOutwards = await tx.outwardEntry.findMany({
+            where: {
+              OR: [
+                { inward_id: { in: searchIds } },
+                { inward_no: { in: searchIds } }
+              ]
+            }
+          });
           
           // Optimization: Pre-aggregate billed and dispatched totals to avoid nested loop overhead
           const billedMap = new Map<string, number>();
@@ -313,8 +335,30 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
         const inward = await tx.inwardEntry.findUnique({ where: { id: inwardIdStr } });
         if (inward) {
           const originalItems = JSON.parse(inward.items_json || '[]');
-          const allInvoices = await (tx as any).legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
-          const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
+          const searchIds = [inwardIdStr];
+          if (inward.inward_no) {
+            searchIds.push(String(inward.inward_no));
+            searchIds.push(`inw_${inward.inward_no}`);
+          }
+          const invoiceOr: any[] = [{ inward_id: { in: searchIds } }];
+          if (inward.inward_no && !isNaN(parseInt(String(inward.inward_no), 10))) {
+            invoiceOr.push({ inward_no: parseInt(String(inward.inward_no), 10) });
+          }
+          if (inward.dc_no && inward.customer_id && !isNaN(parseInt(String(inward.customer_id), 10))) {
+            invoiceOr.push({
+              dc_no: String(inward.dc_no).trim(),
+              customer_id: parseInt(String(inward.customer_id), 10)
+            });
+          }
+          const allInvoices = await (tx as any).legacyInvoice.findMany({ where: { OR: invoiceOr } });
+          const allOutwards = await tx.outwardEntry.findMany({
+            where: {
+              OR: [
+                { inward_id: { in: searchIds } },
+                { inward_no: { in: searchIds } }
+              ]
+            }
+          });
           
           const billedMap = new Map<string, number>();
           const dispatchedMap = new Map<string, number>();
