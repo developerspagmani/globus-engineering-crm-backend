@@ -32,8 +32,11 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    if (id) {
-      where.AND.push({ id: parseInt(id) });
+    if (id && id !== 'all') {
+      const parsedId = parseInt(id, 10);
+      if (!isNaN(parsedId)) {
+        where.AND.push({ id: parsedId });
+      }
     }
 
     if (search) {

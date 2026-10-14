@@ -62,6 +62,41 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     if (status && status !== 'all') {
       where.AND.push({ status: status });
     }
+
+    const customerId = (req.query.customerId || req.query.customer_id) as string;
+    if (customerId && customerId !== 'all') {
+      const orConditions: any[] = [
+        { customer_id: String(customerId) },
+        { vendor_id: String(customerId) }
+      ];
+
+      const parsedId = parseInt(customerId, 10);
+      if (!isNaN(parsedId)) {
+        try {
+          const cust = await prisma.legacyCustomer.findUnique({
+            where: { id: parsedId },
+            select: { customer_name: true }
+          });
+          if (cust?.customer_name) {
+            orConditions.push({ customer_name: cust.customer_name });
+          }
+        } catch (e) {}
+      } else {
+        try {
+          const vendor = await prisma.vendor.findFirst({
+            where: { id: customerId },
+            select: { name: true }
+          });
+          if (vendor?.name) {
+            orConditions.push({ vendor_name: vendor.name });
+          }
+        } catch (e) {}
+      }
+
+      where.AND.push({
+        OR: orConditions
+      });
+    }
     
     const partyType = req.query.partyType as string;
     if (partyType && partyType !== 'all') {

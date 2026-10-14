@@ -14,6 +14,7 @@ import adminRoutes from './adminRoutes';
 import * as companyController from '../controllers/company/companyController';
 import * as gstController from '../controllers/finance/gstController';
 import { authenticate } from '../middleware/authMiddleware';
+import prisma from '../config/prisma';
 
 const router = Router();
 
@@ -51,6 +52,8 @@ router.get('/gst-lookup', gstController.getGstDetails);
 
 // Email Reminders (Publicly accessible for cron job/manual trigger)
 router.use('/', emailReminderRoutes);
+
+
 
 // ==========================================
 // Protected Routes (Require Bearer Token)

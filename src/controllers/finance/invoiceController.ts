@@ -66,8 +66,43 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     }
 
     const customerId = (req.query.customer_id || req.query.customerId) as string;
-    if (customerId) {
-      baseWhere.AND.push({ customer_id: parseInt(customerId) });
+    if (customerId && customerId !== 'all') {
+      const parsedCustId = parseInt(customerId, 10);
+      if (!isNaN(parsedCustId)) {
+        try {
+          const cust = await prisma.legacyCustomer.findUnique({
+            where: { id: parsedCustId },
+            select: { customer_name: true }
+          });
+          if (cust?.customer_name) {
+            baseWhere.AND.push({
+              OR: [
+                { customer_id: parsedCustId },
+                { customer_name: cust.customer_name }
+              ]
+            });
+          } else {
+            baseWhere.AND.push({ customer_id: parsedCustId });
+          }
+        } catch (e) {
+          baseWhere.AND.push({ customer_id: parsedCustId });
+        }
+      } else {
+        try {
+          const vendor = await prisma.vendor.findFirst({
+            where: { id: customerId },
+            select: { name: true }
+          });
+          if (vendor?.name) {
+            baseWhere.AND.push({
+              OR: [
+                { customer_name: vendor.name },
+                { customer_name: { contains: vendor.name } }
+              ]
+            });
+          }
+        } catch (e) {}
+      }
     }
 
     // Search Filter - Exact Match
@@ -309,8 +344,30 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         type: (inv.bill_type === 'with_process' ? 'INVOICE' :
           inv.bill_type === 'without_process' ? 'WOP' :
             inv.bill_type === 'both' ? 'BOTH' : 'INVOICE'),
-        items: JSON.parse(inv.items_json || '[]'),
-        subTotal: parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0,
+        items: JSON.parse(inv.items_json || '[]').map((it: any) => {
+          const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
+          const qty = isWop ? 0 : (parseFloat(String(it.quantity ?? it.qty ?? '0')) || 0);
+          const price = parseFloat(String(it.unitPrice ?? it.unit_price ?? it.price ?? '0')) || 0;
+          const amount = isWop ? 0 : (parseFloat(String(it.amount ?? '0')) || Math.round(qty * price * 100) / 100);
+          return {
+            ...it,
+            quantity: qty,
+            wopQty: parseFloat(String(it.wopQty ?? it.wop_qty ?? '0')) || 0,
+            unitPrice: price,
+            amount,
+            tax: isWop ? 0 : (parseFloat(String(it.tax ?? '0')) || Math.round(amount * (parseFloat(String(inv.tax_rate || 18)) / 100) * 100) / 100),
+            total: isWop ? 0 : (parseFloat(String(it.total ?? '0')) || amount)
+          };
+        }),
+        subTotal: (() => {
+          const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
+          if (isWop) return 0;
+          if (inv.sub_total !== null && inv.sub_total !== undefined && inv.sub_total > 0) return inv.sub_total;
+          const parsedSub = parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0;
+          if (parsedSub > 0) return parsedSub;
+          const parsedItems = JSON.parse(inv.items_json || '[]');
+          return Math.round(parsedItems.reduce((s: number, i: any) => s + ((parseFloat(String(i.quantity ?? i.qty ?? '0')) || 0) * (parseFloat(String(i.unitPrice ?? i.unit_price ?? i.price ?? '0')) || 0)), 0) * 100) / 100;
+        })(),
         grandTotal: parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0,
         paidAmount: parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0,
         discount: parseFloat(String(inv.discount || '0').replace(/[^\d.]/g, '')) || 0,
@@ -524,14 +581,44 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     vehicleNo, vehicle_no, other_charges, other_charges_desc, taxTotal, tax_total, discount,
     shippingName, shipping_name, shippingAddress, shipping_address, shippingState, shipping_state, shippingGstin, shipping_gstin } = req.body;
 
-  const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18'));
-  const finalSubTotal = parseFloat(String(subTotal || '0'));
-  const finalGrandTotal = parseFloat(String(grandTotal || '0'));
-  const finalTaxTotal = taxTotal !== undefined ? parseFloat(String(taxTotal)) : (tax_total !== undefined ? parseFloat(String(tax_total)) : (finalGrandTotal - finalSubTotal));
+  const isWOP = String(billType || '').toLowerCase().includes('without');
+  const finalTaxRate = parseFloat(String(tax_rate || taxRate || '18')) || 18;
+  const finalDiscount = discount !== undefined ? (parseFloat(String(discount || '0')) || 0) : 0;
+  const finalOtherCharges = other_charges !== undefined ? (parseFloat(String(other_charges || '0')) || 0) : 0;
 
+  // Process and sanitize items to ensure item.amount = quantity * unitPrice
+  const processedItems = Array.isArray(items) ? items.map((it: any) => {
+    const qty = isWOP ? 0 : (parseFloat(String(it.quantity ?? it.qty ?? '0')) || 0);
+    const wop = parseFloat(String(it.wopQty ?? it.wop_qty ?? '0')) || 0;
+    const price = parseFloat(String(it.unitPrice ?? it.unit_price ?? it.price ?? '0')) || 0;
+    const amount = isWOP ? 0 : Math.round(qty * price * 100) / 100;
+    const tax = Math.round(amount * (finalTaxRate / 100) * 100) / 100;
+    return {
+      ...it,
+      quantity: qty,
+      wopQty: wop,
+      unitPrice: price,
+      amount,
+      tax,
+      total: Math.round((amount + tax) * 100) / 100
+    };
+  }) : [];
+
+  // Compute SubTotal strictly from processed items (sum of QTY * PRICE)
+  let computedSubTotal = isWOP ? 0 : Math.round(processedItems.reduce((sum: number, it: any) => sum + it.amount, 0) * 100) / 100;
+  if (computedSubTotal === 0 && !isWOP && subTotal) {
+    computedSubTotal = parseFloat(String(subTotal || '0')) || 0;
+  }
+  const finalSubTotal = computedSubTotal;
+
+  const taxableAmount = Math.max(0, finalSubTotal - finalDiscount);
+  const calculatedTaxTotal = isWOP ? 0 : Math.round(taxableAmount * (finalTaxRate / 100) * 100) / 100;
+  const finalTaxTotal = isWOP ? 0 : (taxTotal !== undefined ? parseFloat(String(taxTotal)) : (tax_total !== undefined ? parseFloat(String(tax_total)) : calculatedTaxTotal));
+  
+  const calculatedGrandTotal = isWOP ? 0 : Math.round(taxableAmount + finalTaxTotal + finalOtherCharges);
+  const finalGrandTotal = isWOP ? 0 : (grandTotal !== undefined && parseFloat(String(grandTotal)) > 0 ? parseFloat(String(grandTotal)) : calculatedGrandTotal);
 
   // Exception: Allow 0.00 amount for "Without Process" (WOP) or "Both" (in case only WOP items are present)
-  const isWOP = String(billType || '').toLowerCase().includes('without') || String(billType || '').toLowerCase() === 'both';
   if (!isWOP && (!finalGrandTotal || finalGrandTotal <= 0)) {
      return res.status(400).json({ 
         error: 'Cannot create an invoice with 0.00 amount. Please ensure prices and quantities are entered before saving.' 
@@ -546,11 +633,11 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
 
   try {
     // Ensure invoice and DC (delivery challan) generate in different series based on billType
-    const isWOP = billType === 'Without Process'; // Pure DC/Challan
-    const isWP = billType === 'With Process';    // Pure Invoice
+    const isWOPChallan = billType === 'Without Process'; // Pure DC/Challan
+    const isWPInvoice = billType === 'With Process';    // Pure Invoice
 
     let invNo = null;
-    if (!isWOP) {
+    if (!isWOPChallan) {
        const lastInv = await (prisma as any).legacyInvoice.findFirst({
           where: { company_id: String(finalCompanyId), invoice_no: { not: null } },
           orderBy: { invoice_no: 'desc' },
@@ -568,7 +655,7 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
     }
       
     let delNo = null;
-    if (!isWP) {
+    if (!isWPInvoice) {
        let configNextChallan = 1;
        const companyObj = await prisma.company.findUnique({ where: { id: String(finalCompanyId) }});
        if (companyObj && companyObj.invoice_settings) {
@@ -601,13 +688,13 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
       customer_id: customerId ? parseInt(String(customerId)) : null,
       customer_name: customerName,
       address,
-      total: String(subTotal || '0'),
+      total: String(finalSubTotal),
       sub_total: finalSubTotal,
-      grand_total: String(grandTotal || '0'),
+      grand_total: String(finalGrandTotal),
       discount: discount !== undefined ? String(discount) : undefined,
       other_charges: other_charges !== undefined ? parseFloat(String(other_charges)) : undefined,
       other_charges_desc: other_charges_desc !== undefined ? String(other_charges_desc) : undefined,
-      items_json: JSON.stringify(items || []),
+      items_json: JSON.stringify(processedItems),
       bill_type: billType === 'With Process' ? 'with_process' :
         billType === 'Without Process' ? 'without_process' :
           billType === 'Both' ? 'both' : billType,
@@ -897,25 +984,64 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
     address, subTotal, grandTotal, items, billType, inwardId, status, notes, gstin, state, tax_rate, taxRate, other_charges, other_charges_desc, taxTotal, tax_total, discount,
     shippingName, shipping_name, shippingAddress, shipping_address, shippingState, shipping_state, shippingGstin, shipping_gstin } = req.body;
 
-  const finalTaxRate = tax_rate || taxRate ? parseFloat(String(tax_rate || taxRate)) : undefined;
-  const finalSubTotal = subTotal ? parseFloat(String(subTotal)) : undefined;
-  const finalGrandTotal = grandTotal ? parseFloat(String(grandTotal)) : undefined;
+  const isWOP = String(billType || '').toLowerCase().includes('without');
+  const finalTaxRate = (tax_rate || taxRate) ? (parseFloat(String(tax_rate || taxRate)) || 18) : 18;
+  const finalDiscount = discount !== undefined ? (parseFloat(String(discount || '0')) || 0) : undefined;
+  const finalOtherCharges = other_charges !== undefined ? (parseFloat(String(other_charges || '0')) || 0) : undefined;
 
+  let processedItems: any[] | undefined = undefined;
+  let finalSubTotal = subTotal !== undefined ? parseFloat(String(subTotal || '0')) : undefined;
+  let finalGrandTotal = grandTotal !== undefined ? parseFloat(String(grandTotal || '0')) : undefined;
+  let finalTaxTotal: number | undefined = undefined;
+
+  if (items && Array.isArray(items)) {
+    processedItems = items.map((it: any) => {
+      const qty = isWOP ? 0 : (parseFloat(String(it.quantity ?? it.qty ?? '0')) || 0);
+      const wop = parseFloat(String(it.wopQty ?? it.wop_qty ?? '0')) || 0;
+      const price = parseFloat(String(it.unitPrice ?? it.unit_price ?? it.price ?? '0')) || 0;
+      const amount = isWOP ? 0 : Math.round(qty * price * 100) / 100;
+      const tax = Math.round(amount * (finalTaxRate / 100) * 100) / 100;
+      return {
+        ...it,
+        quantity: qty,
+        wopQty: wop,
+        unitPrice: price,
+        amount,
+        tax,
+        total: Math.round((amount + tax) * 100) / 100
+      };
+    });
+
+    if (!isWOP) {
+      finalSubTotal = Math.round(processedItems.reduce((sum: number, it: any) => sum + it.amount, 0) * 100) / 100;
+      const disc = finalDiscount !== undefined ? finalDiscount : 0;
+      const taxableAmount = Math.max(0, finalSubTotal - disc);
+      finalTaxTotal = Math.round(taxableAmount * (finalTaxRate / 100) * 100) / 100;
+      const oc = finalOtherCharges !== undefined ? finalOtherCharges : 0;
+      finalGrandTotal = Math.round(taxableAmount + finalTaxTotal + oc);
+    } else {
+      finalSubTotal = 0;
+      finalTaxTotal = 0;
+      finalGrandTotal = 0;
+    }
+  } else if (finalSubTotal !== undefined && finalGrandTotal !== undefined) {
+    const disc = finalDiscount !== undefined ? finalDiscount : 0;
+    const taxableAmount = Math.max(0, finalSubTotal - disc);
+    finalTaxTotal = isWOP ? 0 : Math.round(taxableAmount * (finalTaxRate / 100) * 100) / 100;
+  }
+
+  const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
   let taxUpdate: any = {};
-  if (finalGrandTotal !== undefined && finalSubTotal !== undefined) {
-    const finalTaxTotal = taxTotal !== undefined ? parseFloat(String(taxTotal)) : (tax_total !== undefined ? parseFloat(String(tax_total)) : (finalGrandTotal - finalSubTotal));
-    const isIntraState = (state || '').toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
-    const currentRate = finalTaxRate || 12;
-
+  if (finalTaxTotal !== undefined) {
     taxUpdate = {
       tax_total: finalTaxTotal,
       tax_rate: finalTaxRate,
       gst1: isIntraState ? String(finalTaxTotal / 2) : null,
       gst2: isIntraState ? String(finalTaxTotal / 2) : null,
       igst: !isIntraState ? String(finalTaxTotal) : null,
-      gst1_per: isIntraState ? String(currentRate / 2) : null,
-      gst2_per: isIntraState ? String(currentRate / 2) : null,
-      igst_per: !isIntraState ? String(currentRate) : null,
+      gst1_per: isIntraState ? String(finalTaxRate / 2) : null,
+      gst2_per: isIntraState ? String(finalTaxRate / 2) : null,
+      igst_per: !isIntraState ? String(finalTaxRate) : null,
     };
   }
 
@@ -1003,13 +1129,13 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             customer_id: customerId ? parseInt(String(customerId)) : undefined,
             customer_name: customerName,
             address,
-            total: subTotal ? String(subTotal) : undefined,
+            total: finalSubTotal !== undefined ? String(finalSubTotal) : undefined,
             sub_total: finalSubTotal !== undefined ? finalSubTotal : undefined,
-            grand_total: grandTotal ? String(grandTotal) : undefined,
+            grand_total: finalGrandTotal !== undefined ? String(finalGrandTotal) : undefined,
             discount: discount !== undefined ? String(discount) : undefined,
             other_charges: other_charges !== undefined ? parseFloat(String(other_charges)) : undefined,
             other_charges_desc: other_charges_desc !== undefined ? String(other_charges_desc) : undefined,
-            items_json: items ? JSON.stringify(items) : undefined,
+            items_json: processedItems ? JSON.stringify(processedItems) : (items ? JSON.stringify(items) : undefined),
             bill_type: billType === 'With Process' ? 'with_process' :
               billType === 'Without Process' ? 'without_process' :
                 billType === 'Both' ? 'both' : billType,

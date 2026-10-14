@@ -316,7 +316,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           process_name,
           invoice_reference,
           challan_no,
-          vehicle_no,
+          vehicle_no: vehicle_no !== undefined ? vehicle_no : (vehicleNo !== undefined ? vehicleNo : undefined),
           driver_name,
           notes,
           status,
