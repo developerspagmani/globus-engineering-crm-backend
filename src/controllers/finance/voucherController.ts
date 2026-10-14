@@ -60,7 +60,7 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
 
     const fromDate = req.query.fromDate as string;
     const toDate   = req.query.toDate as string;
-    const partyId  = req.query.partyId as string;
+    const partyId = (req.query.partyId || req.query.party_id || req.query.customerId || req.query.customer_id) as string;
 
     if (fromDate || toDate) {
       const dateFilter: any = {};
@@ -73,9 +73,37 @@ export const getAllVouchers = async (req: AuthRequest, res: Response) => {
       where.AND.push({ date: dateFilter });
     }
 
+    if (partyId && partyId !== 'all') {
+      const orConditions: any[] = [
+        { party_id: String(partyId) }
+      ];
 
-    if (partyId) {
-      where.AND.push({ party_id: String(partyId) });
+      const parsedId = parseInt(partyId, 10);
+      if (!isNaN(parsedId)) {
+        try {
+          const cust = await prisma.legacyCustomer.findUnique({
+            where: { id: parsedId },
+            select: { customer_name: true }
+          });
+          if (cust?.customer_name) {
+            orConditions.push({ party_name: cust.customer_name });
+          }
+        } catch (e) {}
+      } else {
+        try {
+          const vendor = await prisma.vendor.findFirst({
+            where: { id: partyId },
+            select: { name: true }
+          });
+          if (vendor?.name) {
+            orConditions.push({ party_name: vendor.name });
+          }
+        } catch (e) {}
+      }
+
+      where.AND.push({
+        OR: orConditions
+      });
     }
 
     const partyType = req.query.partyType as string;

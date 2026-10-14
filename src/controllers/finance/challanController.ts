@@ -51,6 +51,40 @@ export const getAllChallans = async (req: AuthRequest, res: Response) => {
       }
     }
 
+    const customerId = (req.query.customerId || req.query.customer_id || req.query.partyId || req.query.party_id) as string;
+    if (customerId && customerId !== 'all') {
+      const orConditions: any[] = [
+        { party_id: String(customerId) }
+      ];
+
+      const parsedId = parseInt(customerId, 10);
+      if (!isNaN(parsedId)) {
+        try {
+          const cust = await prisma.legacyCustomer.findUnique({
+            where: { id: parsedId },
+            select: { customer_name: true }
+          });
+          if (cust?.customer_name) {
+            orConditions.push({ party_name: cust.customer_name });
+          }
+        } catch (e) {}
+      } else {
+        try {
+          const vendor = await prisma.vendor.findFirst({
+            where: { id: customerId },
+            select: { name: true }
+          });
+          if (vendor?.name) {
+            orConditions.push({ party_name: vendor.name });
+          }
+        } catch (e) {}
+      }
+
+      where.AND.push({
+        OR: orConditions
+      });
+    }
+
     if (search) {
       where.AND.push({
         OR: [
