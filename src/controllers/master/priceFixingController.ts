@@ -12,6 +12,7 @@ export const getPriceFixings = async (req: Request, res: Response) => {
       where: companyId ? { company_id: String(companyId) } : {},
       orderBy: sortBy ? { [sortBy]: sortOrder } : { created_at: 'desc' },
     });
+    res.setHeader('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
     res.json({ success: true, data: priceFixings });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });

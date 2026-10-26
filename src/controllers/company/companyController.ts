@@ -62,12 +62,24 @@ export const getCompanyById = async (req: Request, res: Response) => {
   }
 };
 
+// In-memory cache for companies list (60 seconds TTL)
+let companiesCache: { data: any; expiresAt: number } | null = null;
+export const invalidateCompaniesCache = () => { companiesCache = null; };
+
 export const getAllCompanies = async (req: Request, res: Response) => {
   try {
+    const now = Date.now();
+    if (companiesCache && companiesCache.expiresAt > now) {
+      res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+      return res.json(companiesCache.data);
+    }
+
     const companies = await withRetry(() => prisma.company.findMany());
-    // Prevent browser/CDN caching so deleted companies disappear immediately
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    res.json(companies.map(mapCompany));
+    const mapped = companies.map(mapCompany);
+
+    companiesCache = { data: mapped, expiresAt: now + 60000 };
+    res.set('Cache-Control', 'public, max-age=60, s-maxage=300, stale-while-revalidate=600');
+    res.json(mapped);
   } catch (error: any) {
     console.error('CRITICAL ERROR in getAllCompanies:', error);
     res.status(500).json({ error: 'Failed to fetch companies', detail: error.message });
@@ -97,6 +109,7 @@ export const createCompany = async (req: Request, res: Response) => {
         invoice_settings: JSON.stringify(invoiceSettings || null)
       } as any
     }));
+    invalidateCompaniesCache();
     res.status(201).json({ 
         ...company, 
         activeModules: activeModules || [],
@@ -164,6 +177,7 @@ export const updateCompany = async (req: Request, res: Response) => {
       data: updateData
     }));
 
+    invalidateCompaniesCache();
     res.json(mapCompany(company));
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to update company', detail: error.message });
@@ -198,6 +212,7 @@ export const deleteCompany = async (req: Request, res: Response) => {
       // Finally delete the company
       await tx.company.delete({ where: { id: String(id) } });
     }));
+    invalidateCompaniesCache();
     res.json({ message: 'Company deleted successfully' });
   } catch (error: any) {
     console.error('❌ COMPANY DELETE ERROR:', error);

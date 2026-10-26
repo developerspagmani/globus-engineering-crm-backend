@@ -65,7 +65,8 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
             { date: { lt: new Date(dateFrom as string) } },
             { vch_type: { notIn: ['OUTWARD'] } }
           ]
-        }
+        },
+        select: { type: true, amount: true }
       });
 
       // Simple sum - logic should match the frontend's isVendor check

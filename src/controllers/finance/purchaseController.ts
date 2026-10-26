@@ -18,6 +18,10 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
   const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
   const fromDate = req.query.fromDate as string;
   const toDate = req.query.toDate as string;
+  const companyName = (req.query.companyName as string || req.query.company_name as string || '').trim();
+  const invoiceNo = (req.query.invoiceNo as string || req.query.invoice_no as string || '').trim();
+  const dcNo = (req.query.dcNo as string || req.query.dc_no as string || req.query.challan as string || '').trim();
+  const gstTin = (req.query.gstTin as string || req.query.gst_tin as string || req.query.gstin as string || '').trim();
 
   try {
     const where: any = {
@@ -41,6 +45,30 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
           { dc_no: { contains: search } },
           { gst_tin: { contains: search } }
         ]
+      });
+    }
+
+    if (companyName && companyName !== 'all') {
+      where.AND.push({
+        company_name: { contains: companyName }
+      });
+    }
+
+    if (invoiceNo && invoiceNo !== 'all') {
+      where.AND.push({
+        invoice_no: { contains: invoiceNo }
+      });
+    }
+
+    if (dcNo && dcNo !== 'all') {
+      where.AND.push({
+        dc_no: { contains: dcNo }
+      });
+    }
+
+    if (gstTin && gstTin !== 'all') {
+      where.AND.push({
+        gst_tin: { contains: gstTin }
       });
     }
 
@@ -95,6 +123,67 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
   } catch (err: any) {
     console.error('Error fetching purchase bills:', err);
     res.status(500).json({ error: 'Failed to fetch purchase bills' });
+  }
+};
+
+export const getPurchaseFilterOptions = async (req: AuthRequest, res: Response) => {
+  const queryCompanyId = (req.query.company_id || req.query.companyId) as string;
+  const user = req.user;
+  const companyId = user?.role === 'super_admin' ? queryCompanyId : (user?.company_id || (user as any)?.companyId || queryCompanyId);
+
+  try {
+    const where: any = companyId ? {
+      OR: [
+        { company_id: String(companyId) },
+        { company_id: String(companyId).toLowerCase() }
+      ]
+    } : {};
+
+    const bills = await prisma.purchaseBill.findMany({
+      where,
+      select: {
+        company_name: true,
+        invoice_no: true,
+        dc_no: true,
+        gst_tin: true
+      }
+    });
+
+    const companySet = new Set<string>();
+    const invoiceSet = new Set<string>();
+    const challanSet = new Set<string>();
+    const gstinSet = new Set<string>();
+
+    bills.forEach(b => {
+      if (b.company_name?.trim()) companySet.add(b.company_name.trim());
+      if (b.invoice_no?.trim()) invoiceSet.add(b.invoice_no.trim());
+      if (b.dc_no?.trim()) challanSet.add(b.dc_no.trim());
+      if (b.gst_tin?.trim()) gstinSet.add(b.gst_tin.trim());
+    });
+
+    try {
+      const vendors = await prisma.vendor.findMany({
+        where: companyId ? { company_id: String(companyId) } : {},
+        select: { name: true, company: true, gst: true }
+      });
+      vendors.forEach(v => {
+        if (v.company?.trim()) companySet.add(v.company.trim());
+        else if (v.name?.trim()) companySet.add(v.name.trim());
+        if (v.gst?.trim()) gstinSet.add(v.gst.trim());
+      });
+    } catch (vendorErr) {
+      console.warn('Vendor lookup optional:', vendorErr);
+    }
+
+    res.json({
+      companies: Array.from(companySet).sort((a, b) => a.localeCompare(b)),
+      invoices: Array.from(invoiceSet).sort((a, b) => a.localeCompare(b)),
+      challans: Array.from(challanSet).sort((a, b) => a.localeCompare(b)),
+      gstins: Array.from(gstinSet).sort((a, b) => a.localeCompare(b))
+    });
+  } catch (err: any) {
+    console.error('Error fetching purchase filter options:', err);
+    res.status(500).json({ error: 'Failed to fetch purchase filter options' });
   }
 };
 

@@ -16,6 +16,7 @@ const router = Router();
  */
 // Leads
 router.get('/leads', checkPermission('mod_lead', 'canRead') as any, leadController.getAllLeads);
+router.get('/leads/:id', checkPermission('mod_lead', 'canRead') as any, leadController.getLeadById);
 router.post('/leads', checkPermission('mod_lead', 'canCreate') as any, leadController.createLead);
 router.put('/leads/:id', checkPermission('mod_lead', 'canEdit') as any, leadController.updateLead);
 router.delete('/leads/:id', checkPermission('mod_lead', 'canDelete') as any, leadController.deleteLead);

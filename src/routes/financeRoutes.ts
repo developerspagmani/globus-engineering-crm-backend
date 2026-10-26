@@ -220,6 +220,7 @@ router.get('/audit-logs', checkPermission('mod_user_management', 'canRead') as a
  *   get: { summary: Get purchase bills, tags: [Finance] }
  *   post: { summary: Create purchase bill, tags: [Finance] }
  */
+router.get('/purchase-bills/filter-options', checkPermission('mod_purchase_billing', 'canRead') as any, purchaseController.getPurchaseFilterOptions);
 router.get('/purchase-bills', checkPermission('mod_purchase_billing', 'canRead') as any, purchaseController.getAllPurchaseBills);
 router.post('/purchase-bills', checkPermission('mod_purchase_billing', 'canCreate') as any, purchaseController.createPurchaseBill);
 router.put('/purchase-bills/:id', checkPermission('mod_purchase_billing', 'canEdit') as any, purchaseController.updatePurchaseBill);

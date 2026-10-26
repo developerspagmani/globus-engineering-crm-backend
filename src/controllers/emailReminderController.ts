@@ -627,6 +627,20 @@ export const runScheduledInvoiceReminders = async (companyId?: string) => {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+    // Batch pre-fetch all email logs for this invoice set to eliminate N+1 queries inside loop
+    const invoiceIds = invoices.map(inv => inv.id);
+    const existingLogs = invoiceIds.length > 0 ? await prisma.emailLog.findMany({
+      where: { invoiceId: { in: invoiceIds } },
+      select: { invoiceId: true, reminderType: true, emailSent: true }
+    }) : [];
+
+    const sentMilestones = new Set(existingLogs.map(l => `${l.invoiceId}_${l.reminderType}`));
+    const todayMidnight = new Date();
+    todayMidnight.setHours(0, 0, 0, 0);
+    const sentTodayInvoices = new Set(
+      existingLogs.filter(l => l.emailSent && new Date(l.emailSent) >= todayMidnight).map(l => l.invoiceId)
+    );
+
     for (const invoice of invoices) {
       // 1. Skip if already processed in this batch
       const dupKey = `${invoice.invoice_no || invoice.id}_${invoice.customer_id}`;
@@ -668,24 +682,10 @@ export const runScheduledInvoiceReminders = async (companyId?: string) => {
 
         if (isToday(targetDate)) {
           // Check if milestone was already sent
-          const milestoneAlreadySent = await prisma.emailLog.findFirst({
-            where: {
-              invoiceId: invoice.id,
-              reminderType: reminderType
-            }
-          });
-          if (milestoneAlreadySent) continue;
+          if (sentMilestones.has(`${invoice.id}_${reminderType}`)) continue;
 
           // Check if ANY reminder was sent for this invoice today to avoid spamming
-          const anySentToday = await prisma.emailLog.findFirst({
-            where: {
-              invoiceId: invoice.id,
-              createdAt: {
-                gte: new Date(new Date().setHours(0, 0, 0, 0))
-              }
-            }
-          });
-          if (anySentToday) continue;
+          if (sentTodayInvoices.has(invoice.id)) continue;
 
           // Customer email validation
           const rawCustomerEmail = 
@@ -736,6 +736,9 @@ export const runScheduledInvoiceReminders = async (companyId?: string) => {
                 }
               }).catch((e) => console.error('Error logging emailLog:', e));
             }
+
+            sentMilestones.add(`${invoice.id}_${reminderType}`);
+            sentTodayInvoices.add(invoice.id);
 
             results.push({
               invoiceId: invoice.id,
@@ -1067,15 +1070,7 @@ export const processLeadVisitReminders = async (companyId?: string) => {
   }
 };
 
-function calculateReminderDates(dueDate: Date | string): {
-  '30_days': Date;
-  '1_week': Date;
-  '1_day': Date;
-  'today': Date;
-  urgent: Date | null;
-  overdue_7_days: Date;
-  overdue_15_days: Date;
-} | null {
+function calculateReminderDates(dueDate: Date | string, customBefore?: string, customAfter?: string): Record<string, Date | null> | null {
   if (!dueDate) return null;
   
   const due = new Date(dueDate);
@@ -1084,15 +1079,36 @@ function calculateReminderDates(dueDate: Date | string): {
   const today = new Date();
   const daysUntilDue = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
   
-  return {
+  const dates: Record<string, Date | null> = {
+    '60_days': new Date(due.getTime() - (60 * 24 * 60 * 60 * 1000)),
     '30_days': new Date(due.getTime() - (30 * 24 * 60 * 60 * 1000)),
+    '15_days': new Date(due.getTime() - (15 * 24 * 60 * 60 * 1000)),
     '1_week': new Date(due.getTime() - (7 * 24 * 60 * 60 * 1000)),
+    '3_days': new Date(due.getTime() - (3 * 24 * 60 * 60 * 1000)),
     '1_day': new Date(due.getTime() - (1 * 24 * 60 * 60 * 1000)),
     'today': due,
     'urgent': (daysUntilDue <= 3 && daysUntilDue >= 0) ? today : null,
+    'overdue_3_days': new Date(due.getTime() + (3 * 24 * 60 * 60 * 1000)),
     'overdue_7_days': new Date(due.getTime() + (7 * 24 * 60 * 60 * 1000)),
     'overdue_15_days': new Date(due.getTime() + (15 * 24 * 60 * 60 * 1000)),
+    'overdue_30_days': new Date(due.getTime() + (30 * 24 * 60 * 60 * 1000)),
   };
+
+  if (customBefore) {
+    const beforeList = customBefore.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+    for (const d of beforeList) {
+      dates[`custom_before_${d}`] = new Date(due.getTime() - (d * 24 * 60 * 60 * 1000));
+    }
+  }
+
+  if (customAfter) {
+    const afterList = customAfter.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0);
+    for (const d of afterList) {
+      dates[`custom_after_${d}`] = new Date(due.getTime() + (d * 24 * 60 * 60 * 1000));
+    }
+  }
+
+  return dates;
 }
 
 function isToday(date: Date) {
@@ -1183,6 +1199,15 @@ export const getMailSettings = async (req: Request, res: Response) => {
     ];
     const enableLeadReminders = smtpConfig?.enableLeadReminders !== undefined ? smtpConfig.enableLeadReminders : true;
     const leadReminderDays = smtpConfig?.leadReminderDays !== undefined ? Math.max(1, parseInt(smtpConfig.leadReminderDays) || 1) : 1;
+    const reminderExecutionTime = smtpConfig?.reminderExecutionTime || '10:00';
+    const enableSecondaryTime = smtpConfig?.enableSecondaryTime !== undefined ? smtpConfig.enableSecondaryTime : true;
+    const secondaryExecutionTime = smtpConfig?.secondaryExecutionTime || '12:40';
+    const reminderDaysOfWeek = smtpConfig?.reminderDaysOfWeek || ['mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const leadSameDayAlert = smtpConfig?.leadSameDayAlert !== undefined ? smtpConfig.leadSameDayAlert : true;
+    const customReminderDaysBefore = smtpConfig?.customReminderDaysBefore || '';
+    const customReminderDaysAfter = smtpConfig?.customReminderDaysAfter || '';
+    const lastRunTimestamp = smtpConfig?.lastRunTimestamp || null;
+    const lastRunStats = smtpConfig?.lastRunStats || null;
 
     res.json({
       success: true,
@@ -1200,6 +1225,15 @@ export const getMailSettings = async (req: Request, res: Response) => {
       reminderSchedule: reminderSchedule,
       enableLeadReminders: enableLeadReminders,
       leadReminderDays: leadReminderDays,
+      reminderExecutionTime: reminderExecutionTime,
+      enableSecondaryTime: enableSecondaryTime,
+      secondaryExecutionTime: secondaryExecutionTime,
+      reminderDaysOfWeek: reminderDaysOfWeek,
+      leadSameDayAlert: leadSameDayAlert,
+      customReminderDaysBefore: customReminderDaysBefore,
+      customReminderDaysAfter: customReminderDaysAfter,
+      lastRunTimestamp: lastRunTimestamp,
+      lastRunStats: lastRunStats,
       isConfigured: !!(host && user && pass),
       source: smtpConfig ? 'company' : (process.env.SMTP_HOST ? 'env' : 'unconfigured')
     });
@@ -1226,7 +1260,14 @@ export const updateMailSettings = async (req: Request, res: Response) => {
       enableAutoReminders, 
       reminderSchedule,
       enableLeadReminders,
-      leadReminderDays
+      leadReminderDays,
+      reminderExecutionTime,
+      enableSecondaryTime,
+      secondaryExecutionTime,
+      reminderDaysOfWeek,
+      leadSameDayAlert,
+      customReminderDaysBefore,
+      customReminderDaysAfter
     } = req.body;
 
     if (!company_id || typeof company_id !== 'string') {
@@ -1272,6 +1313,15 @@ export const updateMailSettings = async (req: Request, res: Response) => {
       reminderSchedule: Array.isArray(reminderSchedule) ? reminderSchedule : existingSmtp.reminderSchedule || [],
       enableLeadReminders: enableLeadReminders !== undefined ? enableLeadReminders === true : (existingSmtp.enableLeadReminders !== false),
       leadReminderDays: leadReminderDays !== undefined ? Math.max(1, parseInt(leadReminderDays) || 1) : (existingSmtp.leadReminderDays || 1),
+      reminderExecutionTime: reminderExecutionTime ? String(reminderExecutionTime).trim() : (existingSmtp.reminderExecutionTime || '10:00'),
+      enableSecondaryTime: enableSecondaryTime !== undefined ? enableSecondaryTime === true : (existingSmtp.enableSecondaryTime !== false),
+      secondaryExecutionTime: secondaryExecutionTime ? String(secondaryExecutionTime).trim() : (existingSmtp.secondaryExecutionTime || '12:40'),
+      reminderDaysOfWeek: Array.isArray(reminderDaysOfWeek) ? reminderDaysOfWeek : (existingSmtp.reminderDaysOfWeek || ['mon', 'tue', 'wed', 'thu', 'fri', 'sat']),
+      leadSameDayAlert: leadSameDayAlert !== undefined ? leadSameDayAlert === true : (existingSmtp.leadSameDayAlert !== false),
+      customReminderDaysBefore: customReminderDaysBefore !== undefined ? String(customReminderDaysBefore).trim() : (existingSmtp.customReminderDaysBefore || ''),
+      customReminderDaysAfter: customReminderDaysAfter !== undefined ? String(customReminderDaysAfter).trim() : (existingSmtp.customReminderDaysAfter || ''),
+      lastRunTimestamp: existingSmtp.lastRunTimestamp || null,
+      lastRunStats: existingSmtp.lastRunStats || null,
       updatedAt: new Date().toISOString()
     };
 
@@ -1303,12 +1353,66 @@ export const updateMailSettings = async (req: Request, res: Response) => {
         enableAutoReminders: updatedSmtp.enableAutoReminders,
         reminderSchedule: updatedSmtp.reminderSchedule,
         enableLeadReminders: updatedSmtp.enableLeadReminders,
-        leadReminderDays: updatedSmtp.leadReminderDays
+        leadReminderDays: updatedSmtp.leadReminderDays,
+        reminderExecutionTime: updatedSmtp.reminderExecutionTime,
+        enableSecondaryTime: updatedSmtp.enableSecondaryTime,
+        secondaryExecutionTime: updatedSmtp.secondaryExecutionTime,
+        reminderDaysOfWeek: updatedSmtp.reminderDaysOfWeek,
+        leadSameDayAlert: updatedSmtp.leadSameDayAlert,
+        customReminderDaysBefore: updatedSmtp.customReminderDaysBefore,
+        customReminderDaysAfter: updatedSmtp.customReminderDaysAfter,
+        lastRunTimestamp: updatedSmtp.lastRunTimestamp,
+        lastRunStats: updatedSmtp.lastRunStats
       }
     });
   } catch (error: any) {
     console.error('Error updating mail settings:', error);
     res.status(500).json({ error: error.message || 'Failed to update mail settings' });
+  }
+};
+
+// POST /api/settings/mail/run-reminders - Immediately trigger automated reminder sweep on demand
+export const triggerManualReminders = async (req: Request, res: Response) => {
+  try {
+    const { company_id } = req.body;
+    const { sentCount, results } = await runScheduledInvoiceReminders(company_id as string | undefined);
+    const leadSentCount = await processLeadVisitReminders(company_id as string | undefined);
+
+    const stats = {
+      totalSent: sentCount + leadSentCount,
+      invoicesSent: sentCount,
+      leadRemindersSent: leadSentCount
+    };
+
+    if (company_id) {
+      try {
+        const company = await prisma.company.findUnique({ where: { id: company_id } });
+        if (company?.invoice_settings) {
+          const parsed = JSON.parse(company.invoice_settings);
+          if (parsed?.smtp) {
+            parsed.smtp.lastRunTimestamp = new Date().toISOString();
+            parsed.smtp.lastRunStats = stats;
+            await prisma.company.update({
+              where: { id: company_id },
+              data: { invoice_settings: JSON.stringify(parsed) }
+            });
+          }
+        }
+      } catch (e) {
+        console.error('Failed to update lastRunStats in company:', e);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Triggered reminder sweep: ${sentCount} invoice reminder(s) and ${leadSentCount} lead reminder(s) processed.`,
+      ...stats,
+      details: results,
+      lastRunTimestamp: new Date().toISOString()
+    });
+  } catch (error: any) {
+    console.error('Error in triggerManualReminders:', error);
+    res.status(500).json({ error: error.message || 'Failed to trigger reminders' });
   }
 };
 
@@ -1383,13 +1487,13 @@ export const testMailSettings = async (req: Request, res: Response) => {
       },
       tls: {
         rejectUnauthorized: false
-      }
+      },
+      connectionTimeout: 10000,
+      greetingTimeout: 8000,
+      socketTimeout: 15000
     });
 
-    // 1. Verify connection
-    await testTransporter.verify();
-
-    // 2. Send test email
+    // Send test email directly (sendMail verifies connection, TLS handshake & auth during delivery)
     const testHtml = `
 <!DOCTYPE html>
 <html>
@@ -1426,19 +1530,23 @@ export const testMailSettings = async (req: Request, res: Response) => {
       html: testHtml
     });
 
-    res.json({
-      success: true,
-      message: `Test email successfully delivered to ${testEmail}!`,
-      messageId: info.messageId,
-      host,
-      port
-    });
+    if (!res.headersSent) {
+      res.json({
+        success: true,
+        message: `Test email successfully delivered to ${testEmail}!`,
+        messageId: info.messageId,
+        host,
+        port
+      });
+    }
   } catch (error: any) {
     console.error('SMTP test connection failed:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message || 'SMTP connection failed. Check host, port, credentials, or firewall.' 
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ 
+        success: false, 
+        error: error.message || 'SMTP connection failed. Check host, port, credentials, or firewall.' 
+      });
+    }
   }
 };
 

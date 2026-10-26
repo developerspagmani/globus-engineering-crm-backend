@@ -14,10 +14,9 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
   const requestedLimit = parseInt(req.query.limit as string);
   
   // Selection Mode Expansion: If frontend requests a large limit (standard for selection dropdowns/modals is 100 or 1000),
-  // we expand to 5000 to ensure the user sees all 200+ pending records.
   let limit = requestedLimit || 10;
   if (requestedLimit >= 100) {
-    limit = 5000;
+    limit = Math.min(requestedLimit, 250);
   }
   const skip = (page - 1) * limit;
   const search = (req.query.search as string || '').toLowerCase();
@@ -42,7 +41,7 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
     const id = (req.query.id || req.query.inward_id) as string;
     if (id) {
       where.AND.push({ id: String(id) });
-      limit = 5000;
+      limit = 1;
     }
 
     if (search) {

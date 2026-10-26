@@ -32,10 +32,11 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const requestedLimit = parseInt(req.query.limit as string);
   
   // If we are in "Selection" mode (ids provided) OR the frontend requests a large batch (usually 100 for dropdowns), 
-  // we expand the limit to 5000 to ensure the user sees all 200+ records in one view.
   let limit = requestedLimit || 10;
-  if (rawInvoiceNos || requestedLimit === 100 || req.query.type === 'selection' || req.query.id) {
-    limit = 5000;
+  if (rawInvoiceNos || req.query.type === 'selection') {
+    limit = 300;
+  } else if (requestedLimit) {
+    limit = Math.min(requestedLimit, 200);
   }
   const skip = (page - 1) * limit;
 
@@ -218,6 +219,22 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       let statusIds: number[] = [];
       if (statusType === 'pending') {
           const cutoffDate = new Date('2025-01-01T00:00:00.000Z');
+          const pendingWhere = {
+            ...baseWhere,
+            AND: [
+              ...(baseWhere.AND || []),
+              { invoice_date: { gte: cutoffDate } },
+              {
+                status: {
+                  notIn: ['PAID', 'COMPLETED', 'CANCELLED', 'cancelled', 'paid', 'completed']
+                }
+              }
+            ]
+          };
+          const allInvoices = await prisma.legacyInvoice.findMany({
+              where: pendingWhere,
+              select: { id: true, invoice_date: true, total: true, grand_total: true, paid_amount: true, status: true, sub_total: true, tax_total: true, bill_type: true }
+          });
           statusIds = allInvoices
               .filter(inv => {
                   const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
@@ -227,10 +244,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
                   if (grand <= 0 && taxable > 0) grand = taxable + taxVal;
                   const paid = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
                   
-                  const isPending = (grand - paid) > 0.5 && grand > 0;
-                  const isFrom2025 = inv.invoice_date && new Date(inv.invoice_date) >= cutoffDate;
-                  
-                  return isPending && isFrom2025;
+                  return (grand - paid) > 0.5 && grand > 0;
               })
               .map(inv => inv.id);
       } else if (statusType === 'paid') {

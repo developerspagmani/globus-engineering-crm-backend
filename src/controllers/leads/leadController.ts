@@ -97,6 +97,56 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
       where.AND.push({ created_at: dateFilter });
     }
 
+    // Lead Reminder Filtering
+    const upcomingReminders = req.query.upcomingReminders as string;
+    const reminderScope = req.query.reminderScope as string;
+
+    if (upcomingReminders === 'true') {
+      where.AND.push({
+        next_visit_date: { not: null }
+      });
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayEnd = new Date();
+      todayEnd.setHours(23, 59, 59, 999);
+
+      if (reminderScope === 'today') {
+        where.AND.push({
+          next_visit_date: {
+            gte: todayStart,
+            lte: todayEnd
+          }
+        });
+      } else if (reminderScope === 'tomorrow') {
+        const tomorrowStart = new Date(todayStart);
+        tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+        const tomorrowEnd = new Date(todayEnd);
+        tomorrowEnd.setDate(tomorrowEnd.getDate() + 1);
+        where.AND.push({
+          next_visit_date: {
+            gte: tomorrowStart,
+            lte: tomorrowEnd
+          }
+        });
+      } else if (reminderScope === 'week') {
+        const weekEnd = new Date(todayEnd);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+        where.AND.push({
+          next_visit_date: {
+            gte: todayStart,
+            lte: weekEnd
+          }
+        });
+      } else if (reminderScope === 'overdue') {
+        where.AND.push({
+          next_visit_date: {
+            lt: todayStart
+          }
+        });
+      }
+    }
+
     // Security: Sales users see leads in their assigned area OR leads they created themselves
     if (user?.role === 'sales') {
       const salesFilter: any = {
@@ -112,14 +162,24 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
       where.AND.push(salesFilter);
     }
 
-    const [leads, totalCount] = await Promise.all([
+    const defaultSortField = upcomingReminders === 'true' ? 'next_visit_date' : 'created_at';
+    const defaultSortOrder = upcomingReminders === 'true' ? 'asc' : 'desc';
+    const orderClause = sortBy ? { [sortBy]: sortOrder } : { [defaultSortField]: defaultSortOrder };
+
+    const whereRemindersCount: any = {
+      AND: where.AND.filter((c: any) => !c.next_visit_date)
+    };
+    whereRemindersCount.AND.push({ next_visit_date: { not: null } });
+
+    const [leads, totalCount, remindersCount] = await Promise.all([
       prisma.lead.findMany({
         where,
         skip,
         take: limit,
-        orderBy: sortBy ? { [sortBy]: sortOrder } : { created_at: 'desc' }
+        orderBy: orderClause
       }),
-      prisma.lead.count({ where })
+      prisma.lead.count({ where }),
+      prisma.lead.count({ where: whereRemindersCount }).catch(() => 0)
     ]);
 
     // Fetch assigned sales person details for these leads
@@ -157,10 +217,45 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
         page,
         limit,
         totalPages: Math.ceil(totalCount / limit)
-      }
+      },
+      upcomingCount: remindersCount
     });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch leads', detail: error.message });
+  }
+};
+
+export const getLeadById = async (req: AuthRequest, res: Response) => {
+  const id = req.params.id as string;
+  try {
+    const lead = await prisma.lead.findUnique({
+      where: { id }
+    });
+    if (!lead) {
+      return res.status(404).json({ error: 'Lead not found' });
+    }
+    let agent = null;
+    if (lead.agent_id) {
+      agent = await prisma.user.findUnique({
+        where: { id: lead.agent_id },
+        select: { id: true, name: true, email: true, phone: true }
+      });
+    }
+    const mappedLead = {
+      ...lead,
+      agentId: lead.agent_id,
+      agentName: agent?.name || null,
+      agentEmail: agent?.email || null,
+      agentPhone: agent?.phone || null,
+      companyId: lead.company_id,
+      assignedArea: lead.assigned_area,
+      createdAt: lead.created_at,
+      nextVisitDate: lead.next_visit_date,
+      productInterest: lead.product_interest
+    };
+    res.json(mappedLead);
+  } catch (error: any) {
+    res.status(500).json({ error: 'Failed to fetch lead', detail: error.message });
   }
 };
 
@@ -268,9 +363,9 @@ export const deleteLead = async (req: AuthRequest, res: Response) => {
 // Manually send lead visit reminder to the assigned sales person on demand
 export const sendLeadVisitReminder = async (req: AuthRequest, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const companyId = req.user?.company_id || undefined;
-    const result = await sendSingleLeadVisitReminder(id as string, companyId);
+    const result = await sendSingleLeadVisitReminder(id, companyId);
     res.json(result);
   } catch (err: any) {
     console.error('Error in sendLeadVisitReminder:', err);

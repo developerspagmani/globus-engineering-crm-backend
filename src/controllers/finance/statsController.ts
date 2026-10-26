@@ -2,6 +2,9 @@ import { Response } from 'express';
 import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 
+// In-memory cache for dashboard stats (30 seconds TTL per company)
+const statsCache = new Map<string, { data: any; expiresAt: number }>();
+
 /**
  * Aggregates financial data for the dashboard
  */
@@ -25,6 +28,15 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Company ID is required for dashboard statistics.' });
   }
 
+  // Check in-memory cache
+  const cacheKey = String(companyId || 'global');
+  const cached = statsCache.get(cacheKey);
+  const now = Date.now();
+  if (cached && cached.expiresAt > now) {
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+    return res.json(cached.data);
+  }
+
   try {
     // 1. Run queries in parallel to save time and reduce connection hold duration
     const companyWhere = {
@@ -35,17 +47,39 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       ]
     };
 
-
     const [invoices, customerCount, vendorCount, latestInvoices, latestInwards] = await Promise.all([
       prisma.legacyInvoice.findMany({
         where: companyWhere,
-        include: { customer: true }
+        select: {
+          id: true,
+          invoice_no: true,
+          customer_name: true,
+          due_date: true,
+          invoice_date: true,
+          sub_total: true,
+          total: true,
+          tax_total: true,
+          grand_total: true,
+          paid_amount: true,
+          status: true,
+          customer: {
+            select: { customer_name: true }
+          }
+        }
       }),
       prisma.legacyCustomer.count({ where: companyWhere }),
       prisma.vendor.count({ where: companyWhere }),
       prisma.legacyInvoice.findMany({
         where: companyWhere,
-        include: { customer: true },
+        select: {
+          id: true,
+          invoice_no: true,
+          invoice_date: true,
+          customer_name: true,
+          grand_total: true,
+          status: true,
+          customer: { select: { customer_name: true } }
+        },
         orderBy: [
           { invoice_date: 'desc' },
           { id: 'desc' }
@@ -129,7 +163,7 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       })
       .slice(0, 10);
 
-    res.json({
+    const responsePayload = {
       summary: {
         totalInvoiced: Math.round(totalInvoiced * 100) / 100,
         totalPaid: Math.round(totalPaid * 100) / 100,
@@ -148,7 +182,12 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
         status: inv.status
       })),
       latestInwards
-    });
+    };
+
+    // Cache for 30 seconds
+    statsCache.set(cacheKey, { data: responsePayload, expiresAt: Date.now() + 30000 });
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
+    res.json(responsePayload);
 
   } catch (error: any) {
     console.error('DASHBOARD STATS ERROR:', error);

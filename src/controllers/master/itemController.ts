@@ -54,6 +54,7 @@ export const getItems = async (req: Request, res: Response) => {
       (prisma as any).item.count({ where })
     ]);
 
+    res.setHeader('Cache-Control', 'private, max-age=60, stale-while-revalidate=120');
     res.json({
       success: true,
       data: items,

@@ -112,6 +112,7 @@ export const getAllVendors = async (req: AuthRequest, res: Response) => {
       companyId: v.company_id
     }));
 
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     res.json({
       items: formattedVendors,
       pagination: {

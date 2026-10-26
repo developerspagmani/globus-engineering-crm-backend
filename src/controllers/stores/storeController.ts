@@ -82,6 +82,7 @@ export const getAllStores = async (req: AuthRequest, res: Response) => {
       } : null
     }));
 
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     res.json({
       items: formattedStores,
       pagination: {
@@ -170,7 +171,8 @@ export const getStoreVisits = async (req: AuthRequest, res: Response) => {
   try {
     const visits = await prisma.storeVisit.findMany({
       where: { store_id: String(storeId) },
-      orderBy: { visit_date: 'desc' }
+      orderBy: { visit_date: 'desc' },
+      take: 100
     });
     
     // Map to camelCase for frontend
@@ -183,6 +185,7 @@ export const getStoreVisits = async (req: AuthRequest, res: Response) => {
       nextVisitDate: v.next_visit_date,
       createdAt: v.created_at
     }));
+    res.setHeader('Cache-Control', 'private, max-age=15, stale-while-revalidate=30');
     res.json(formattedVisits);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch visits', detail: error.message });

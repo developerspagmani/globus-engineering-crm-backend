@@ -125,6 +125,7 @@ export const getAllCustomers = async (req: AuthRequest, res: Response) => {
       agentId: c.agent_id
     }));
 
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     res.json({
       items: mapped,
       pagination: {

@@ -5,9 +5,28 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 
 export const getAllUsers = async (req: AuthRequest, res: Response) => {
+  const reqUser = req.user;
+  const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
+  const companyId = reqUser?.role === 'super_admin' ? queryCompanyId : (reqUser?.company_id || (reqUser as any)?.companyId);
+
+  const where: any = {};
+  if (companyId) {
+    where.company_id = String(companyId);
+  }
+
   try {
     const users = await prisma.user.findMany({
-      include: { company: true }
+      where,
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            plan: true
+          }
+        }
+      }
     });
     // Remove sensitive data and map to frontend snakeCase -> camelCase
     const formattedUsers = users.map(u => ({
@@ -28,8 +47,9 @@ export const getAllUsers = async (req: AuthRequest, res: Response) => {
           return [];
         }
       })()
-
     }));
+
+    res.setHeader('Cache-Control', 'private, max-age=30, stale-while-revalidate=60');
     res.json(formattedUsers);
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to fetch users', detail: error.message });

@@ -16,6 +16,7 @@ router.post('/invoices/:id/send-reminder', emailReminderController.sendInvoiceRe
 router.get('/settings/mail', emailReminderController.getMailSettings);
 router.put('/settings/mail', emailReminderController.updateMailSettings);
 router.post('/settings/mail/test', emailReminderController.testMailSettings);
+router.post('/settings/mail/run-reminders', emailReminderController.triggerManualReminders);
 
 // Manually trigger reminder processing (useful for testing or manual runs)
 router.get('/email-reminder-service', emailReminderController.processEmailReminders);
