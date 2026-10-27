@@ -49,37 +49,36 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // 1. Calculate Opening Balance if dateFrom is provided
+    // 1. Calculate Opening Balance if dateFrom is provided (Optimized via database SUM aggregation)
     let openingBalance = 0;
     if (dateFrom) {
-      const entriesBefore = await (prisma.ledgerEntry as any).findMany({
-        where: {
-          AND: [
-            partyId ? { party_id: String(partyId) } : {},
-            companyId ? {
-              OR: [
-                { company_id: String(companyId) },
-                { company_id: String(companyId).toLowerCase() }
-              ]
-            } : {},
-            { date: { lt: new Date(dateFrom as string) } },
-            { vch_type: { notIn: ['OUTWARD'] } }
-          ]
-        },
-        select: { type: true, amount: true }
-      });
+      const openingWhere = {
+        AND: [
+          partyId ? { party_id: String(partyId) } : {},
+          companyId ? {
+            OR: [
+              { company_id: String(companyId) },
+              { company_id: String(companyId).toLowerCase() }
+            ]
+          } : {},
+          { date: { lt: new Date(dateFrom as string) } },
+          { vch_type: { notIn: ['OUTWARD'] } }
+        ]
+      };
 
-      // Simple sum - logic should match the frontend's isVendor check
-      // However, the backend doesn't always know if it's a vendor or customer here easily without a separate query.
-      // We'll rely on the frontend to interpret the opening balance based on the party type it knows.
-      // Or we can just return the raw credit/debit sums.
-      
-      let totalDr = 0;
-      let totalCr = 0;
-      entriesBefore.forEach((e: any) => {
-        if (e.type === 'debit') totalDr += parseFloat(String(e.amount || 0));
-        else totalCr += parseFloat(String(e.amount || 0));
-      });
+      const [drRes, crRes] = await Promise.all([
+        (prisma.ledgerEntry as any).aggregate({
+          where: { ...openingWhere, type: 'debit' },
+          _sum: { amount: true }
+        }),
+        (prisma.ledgerEntry as any).aggregate({
+          where: { ...openingWhere, type: 'credit' },
+          _sum: { amount: true }
+        })
+      ]);
+
+      const totalDr = drRes?._sum?.amount || 0;
+      const totalCr = crRes?._sum?.amount || 0;
       openingBalance = totalDr - totalCr; // Standard: Debit - Credit
     }
 
@@ -94,15 +93,10 @@ export const getLedgerEntries = async (req: AuthRequest, res: Response) => {
     if (search) {
       entriesWhere.AND.push({
         OR: [
-          { party_name: { contains: search.toLowerCase() } },
-          { party_name: { contains: search.toUpperCase() } },
           { party_name: { contains: search } },
-          { vch_no: { contains: search.toLowerCase() } },
-          { vch_no: { contains: search.toUpperCase() } },
-          { description: { contains: search.toLowerCase() } },
-          { description: { contains: search.toUpperCase() } },
-          { vch_type: { contains: search.toLowerCase() } },
-          { vch_type: { contains: search.toUpperCase() } }
+          { vch_no: { contains: search } },
+          { description: { contains: search } },
+          { vch_type: { contains: search } }
         ]
       });
     }
@@ -203,20 +197,26 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
               where: { id: parseInt(String(linkedInvoiceId)) }
             });
 
-            if (targetInv && targetInv.status !== 'PAID') {
-              const grandTotal = parseFloat(targetInv.grand_total || '0');
-              const paidAmount = parseFloat(targetInv.paid_amount || '0');
+            if (targetInv && targetInv.status !== 'PAID' && targetInv.status !== 'COMPLETED' && targetInv.status !== 'CLOSED' && targetInv.status !== 'SETTLED') {
+              let grandTotal = parseFloat(String(targetInv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+              if (grandTotal <= 0) {
+                const sub = targetInv.sub_total ?? (parseFloat(String(targetInv.total || '0').replace(/[^\d.]/g, '')) || 0);
+                const tax = targetInv.tax_total ?? (parseFloat(String(targetInv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+                if (sub > 0) grandTotal = sub + tax;
+              }
+              const paidAmount = parseFloat(String(targetInv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
               const balanceDue = grandTotal - paidAmount;
 
               if (balanceDue > 0) {
                 const application = Math.min(remainingToApply, balanceDue);
                 const newPaidTotal = paidAmount + application;
+                const isPaid = (grandTotal > 0 && newPaidTotal >= (grandTotal - 0.5)) || (grandTotal <= 0 && newPaidTotal > 0);
 
                 await (tx as any).legacyInvoice.update({
                   where: { id: targetInv.id },
                   data: {
                     paid_amount: String(newPaidTotal),
-                    status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                    status: isPaid ? 'PAID' : 'BILLED'
                   }
                 });
                 remainingToApply -= application;
@@ -229,7 +229,7 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
             const pendingInvoices = await (tx as any).legacyInvoice.findMany({
               where: {
                 customer_id: parseInt(String(partyId)),
-                status: { not: 'PAID' },
+                status: { notIn: ['PAID', 'COMPLETED', 'CLOSED', 'SETTLED', 'CANCELLED', 'cancelled'] },
                 company_id: finalCompanyId,
                 id: linkedInvoiceId ? { not: parseInt(String(linkedInvoiceId)) } : undefined
               },
@@ -238,19 +238,25 @@ export const createLedgerEntry = async (req: AuthRequest, res: Response) => {
 
             for (const inv of pendingInvoices) {
               if (remainingToApply <= 0) break;
-              const grandTotal = parseFloat(inv.grand_total || '0');
-              const paidAmount = parseFloat(inv.paid_amount || '0');
+              let grandTotal = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+              if (grandTotal <= 0) {
+                const sub = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
+                const tax = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+                if (sub > 0) grandTotal = sub + tax;
+              }
+              const paidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
               const balanceDue = grandTotal - paidAmount;
-              if (balanceDue <= 0) continue;
+              if (balanceDue <= 0.1) continue;
 
               const application = Math.min(remainingToApply, balanceDue);
               const newPaidTotal = paidAmount + application;
+              const isPaid = (grandTotal > 0 && newPaidTotal >= (grandTotal - 0.5)) || (grandTotal <= 0 && newPaidTotal > 0);
 
               await (tx as any).legacyInvoice.update({
                 where: { id: inv.id },
                 data: {
                   paid_amount: String(newPaidTotal),
-                  status: newPaidTotal >= grandTotal ? 'PAID' : 'BILLED'
+                  status: isPaid ? 'PAID' : 'BILLED'
                 }
               });
               remainingToApply -= application;

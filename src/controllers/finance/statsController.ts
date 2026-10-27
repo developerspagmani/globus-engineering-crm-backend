@@ -130,9 +130,9 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       totalInvoiced += grand;
       totalPaid += paid;
 
-      // Check if unpaid (balance > 0.5 and status is not paid/completed)
+      // Check if unpaid (balance > 0.5 and status is not paid/completed/closed/cancelled)
       const cleanStatus = (inv.status || '').trim().toUpperCase();
-      const isPaidStatus = cleanStatus === 'PAID' || cleanStatus === 'COMPLETED';
+      const isPaidStatus = cleanStatus === 'PAID' || cleanStatus === 'COMPLETED' || cleanStatus === 'CLOSED' || cleanStatus === 'SETTLED' || cleanStatus === 'CANCELLED';
       const isUnpaid = (grand - paid) > 0.5 && !isPaidStatus;
       const dueDate = inv.due_date || inv.invoice_date;
 
@@ -163,11 +163,13 @@ export const getFinanceStats = async (req: AuthRequest, res: Response) => {
       })
       .slice(0, 10);
 
+    const totalPendingActual = pendingInvoices.reduce((sum, item) => sum + (item.pending || 0), 0);
+
     const responsePayload = {
       summary: {
         totalInvoiced: Math.round(totalInvoiced * 100) / 100,
         totalPaid: Math.round(totalPaid * 100) / 100,
-        pendingAmount: Math.round((totalInvoiced - totalPaid) * 100) / 100,
+        pendingAmount: Math.round(totalPendingActual * 100) / 100,
         customerCount,
         vendorCount,
         overdueCount

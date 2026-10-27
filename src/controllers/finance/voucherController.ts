@@ -240,33 +240,15 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             if (exactIds.length > 0) {
               invoices = await (tx as any).legacyInvoice.findMany({
                 where: {
-                  AND: [
-                    { id: { in: exactIds } },
-                    {
-                      OR: [
-                        { company_id: finalCompanyId ? String(finalCompanyId) : undefined },
-                        { company_id: finalCompanyId ? String(finalCompanyId).toLowerCase() : undefined }
-                      ]
-                    }
-                  ]
+                  id: { in: exactIds }
                 }
               });
             } else {
               invoices = await (tx as any).legacyInvoice.findMany({
                 where: {
-                  AND: [
-                    {
-                      OR: [
-                        { invoice_no: { in: invNumsAsInts } },
-                        { dc_no: { in: invNumbers } }
-                      ]
-                    },
-                    {
-                      OR: [
-                        { company_id: finalCompanyId ? String(finalCompanyId) : undefined },
-                        { company_id: finalCompanyId ? String(finalCompanyId).toLowerCase() : undefined }
-                      ]
-                    }
+                  OR: [
+                    { invoice_no: { in: invNumsAsInts } },
+                    { dc_no: { in: invNumbers } }
                   ]
                 }
               });
@@ -277,23 +259,34 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
             for (const inv of invoices) {
               if (remainingAmount <= 0) break;
               
-              const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-              const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
-              
-              const currentGrandTotal = parseFloat(cleanGrand) || 0;
-              const currentPaidAmount = parseFloat(cleanPaid) || 0;
+              let currentGrandTotal = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+              if (currentGrandTotal <= 0) {
+                const sub = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
+                const tax = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+                if (sub > 0) currentGrandTotal = sub + tax;
+              }
+              const currentPaidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
               
               const balanceDue = currentGrandTotal - currentPaidAmount;
-              if (balanceDue <= 0.1) continue; 
+              if (balanceDue <= 0.1 && currentGrandTotal > 0) {
+                if (inv.status !== 'PAID') {
+                  await (tx as any).legacyInvoice.update({
+                    where: { id: inv.id },
+                    data: { status: 'PAID' }
+                  });
+                }
+                continue; 
+              }
 
-              const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
+              const paymentForThisInvoice = Math.min(remainingAmount, balanceDue > 0 ? balanceDue : remainingAmount);
               const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
+              const isPaid = (currentGrandTotal > 0 && newPaidAmount >= (currentGrandTotal - 0.5)) || (currentGrandTotal <= 0 && newPaidAmount > 0);
               
               await (tx as any).legacyInvoice.update({
                 where: { id: inv.id },
                 data: {
                   paid_amount: String(newPaidAmount),
-                  status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED'
+                  status: isPaid ? 'PAID' : 'BILLED'
                 }
               });
               remainingAmount -= paymentForThisInvoice;
@@ -302,100 +295,7 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
         }
 
         // 3. UPDATE LEDGER
-        if (party_id) {
-          await (tx.ledgerEntry as any).deleteMany({ where: { reference_id: voucher.voucher_no || voucher.id } });
-
-          const lastEntry = await (tx.ledgerEntry as any).findFirst({
-             where: {
-               party_id: String(party_id),
-               company_id: finalCompanyId ? String(finalCompanyId) : undefined
-             },
-             orderBy: { created_at: 'desc' }
-          });
-
-          const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-          let currentBalance = lastBalance;
-
-          const baseEntryType = type === 'receipt' ? 'credit' : 'debit';
-          const resolvedEntryType = (party_type === 'vendor' && type === 'payment') ? 'debit' : 
-                                    (party_type === 'vendor' && type === 'receipt') ? 'credit' : baseEntryType;
-
-          if (items && Array.isArray(items) && items.length > 0) {
-            for (const item of items) {
-              const itemAmount = parseFloat(String(item.amount || '0'));
-              const itemAdjustment = parseFloat(String(item.adjustmentValue || item.adjustment_value || '0'));
-              const netItemAmount = Math.max(0, itemAmount - itemAdjustment);
-              
-              if (netItemAmount <= 0) continue;
-
-              if (party_type === 'customer') {
-                currentBalance = type === 'receipt' ? (currentBalance - netItemAmount) : (currentBalance + netItemAmount);
-              } else if (party_type === 'vendor') {
-                currentBalance = type === 'payment' ? (currentBalance - netItemAmount) : (currentBalance + netItemAmount);
-              }
-
-              const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
-              // For individual items, we don't repeat the full comma-separated reference_no string. We just use cheque_no if present.
-              const ref = cheque_no ? ` (No. ${cheque_no})` : '';
-              const invStr = item.invoiceNo ? ` - Inv: ${item.invoiceNo}` : '';
-              const adjType = item.adjustmentType || item.adjustment_type || 'Adj';
-              const adjStr = itemAdjustment > 0 ? ` (${adjType}: ₹${itemAdjustment})` : '';
-
-              await (tx.ledgerEntry as any).create({
-                data: {
-                  id: crypto.randomUUID(),
-                  party_id: String(party_id),
-                  party_name: party_name || 'N/A',
-                  party_type: party_type || 'customer',
-                  company_id: finalCompanyId ? String(finalCompanyId) : null,
-                  date: date ? new Date(date) : new Date(),
-                  vch_type: type.toUpperCase(),
-                  vch_no: voucher.voucher_no || voucher.id,
-                  type: resolvedEntryType,
-                  amount: netItemAmount,
-                  balance: currentBalance,
-                  description: `${mode}${ref}${invStr}${adjStr}`,
-                  reference_id: String(voucher.id)
-                }
-              });
-            }
-          } else {
-            // Fallback for vouchers without item breakdown
-            const ledgerAmount = finalAmount;
-            if (party_type === 'customer') {
-              currentBalance = type === 'receipt' ? (currentBalance - ledgerAmount) : (currentBalance + ledgerAmount);
-            } else if (party_type === 'vendor') {
-              currentBalance = type === 'payment' ? (currentBalance - ledgerAmount) : (currentBalance + ledgerAmount);
-            }
-            
-            const currentTDS = parseFloat(String(tds_amount ?? tdsAmount ?? '0')) || 0;
-            const currentOthers = parseFloat(String(others_amount ?? othersAmount ?? '0')) || 0;
-
-            await (tx.ledgerEntry as any).create({
-              data: {
-                id: crypto.randomUUID(),
-                party_id: String(party_id),
-                party_name: party_name || 'N/A',
-                party_type: party_type || 'customer',
-                company_id: finalCompanyId ? String(finalCompanyId) : null,
-                date: date ? new Date(date) : new Date(),
-                vch_type: type.toUpperCase(),
-                vch_no: voucher.voucher_no || voucher.id,
-                type: resolvedEntryType,
-                amount: ledgerAmount,
-                balance: currentBalance,
-                description: (() => {
-                  const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
-                  const ref = (cheque_no || reference_no) ? ` (No. ${cheque_no || reference_no})` : '';
-                  const tdsLabel = currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : '';
-                  const othersLabel = currentOthers > 0 ? ` (Others: ₹${currentOthers})` : '';
-                  return `${mode}${ref}${tdsLabel}${othersLabel}`;
-                })(),
-                reference_id: String(voucher.id)
-              }
-            });
-          }
-        }
+        await syncLedgerForVoucher(tx, voucher, items);
         return voucher;
       }, {
         maxWait: 15000,
@@ -407,6 +307,238 @@ export const createVoucher = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error('❌ VOUCHER CREATE ERROR:', error);
     res.status(500).json({ error: 'Failed to create voucher', detail: error.message });
+  }
+};
+
+const syncLedgerForVoucher = async (tx: any, voucher: any, items?: any[], oldVoucher?: any) => {
+  const party_id = voucher.party_id;
+  if (!party_id) return;
+
+  const party_type = voucher.party_type || 'customer';
+  const type = (voucher.type || 'receipt').toLowerCase();
+  const payment_mode = voucher.payment_mode;
+  const cheque_no = voucher.cheque_no;
+  const reference_no = voucher.reference_no;
+  const date = voucher.date ? new Date(voucher.date) : new Date();
+  const company_id = voucher.company_id ? String(voucher.company_id) : null;
+
+  // 1. Delete previous entries associated with this voucher
+  const deleteConditions: any[] = [
+    { reference_id: String(voucher.id) },
+    { reference_id: String(voucher.voucher_no) },
+    { vch_no: String(voucher.voucher_no) }
+  ];
+  if (oldVoucher) {
+    if (oldVoucher.id) deleteConditions.push({ reference_id: String(oldVoucher.id) });
+    if (oldVoucher.voucher_no) {
+      deleteConditions.push({ reference_id: String(oldVoucher.voucher_no) });
+      deleteConditions.push({ vch_no: String(oldVoucher.voucher_no) });
+    }
+  }
+  await (tx.ledgerEntry as any).deleteMany({
+    where: { OR: deleteConditions }
+  });
+
+  // 2. Query running balance for party
+  const lastEntry = await (tx.ledgerEntry as any).findFirst({
+    where: {
+      party_id: String(party_id),
+      company_id: company_id ? String(company_id) : undefined
+    },
+    orderBy: { created_at: 'desc' }
+  });
+
+  const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
+  let currentBalance = lastBalance;
+
+  const baseEntryType = type === 'receipt' ? 'credit' : 'debit';
+  const resolvedEntryType = (party_type === 'vendor' && type === 'payment') ? 'debit' :
+                            (party_type === 'vendor' && type === 'receipt') ? 'credit' : baseEntryType;
+
+  // 3. Create Entries (Itemized or Fallback)
+  if (items && Array.isArray(items) && items.length > 0) {
+    let totalItemAdjustments = 0;
+    for (const item of items) {
+      const itemAmount = parseFloat(String(item.amount || '0'));
+      const itemAdjustment = parseFloat(String(item.adjustmentValue || item.adjustment_value || '0'));
+      const netItemAmount = Math.max(0, itemAmount - itemAdjustment);
+      totalItemAdjustments += itemAdjustment;
+
+      // 3a. Cash / Bank receipt or payment entry
+      if (netItemAmount > 0) {
+        if (party_type === 'customer') {
+          currentBalance = type === 'receipt' ? (currentBalance - netItemAmount) : (currentBalance + netItemAmount);
+        } else if (party_type === 'vendor') {
+          currentBalance = type === 'payment' ? (currentBalance - netItemAmount) : (currentBalance + netItemAmount);
+        }
+
+        const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
+        const ref = cheque_no ? ` (No. ${cheque_no})` : '';
+        const invStr = item.invoiceNo ? ` - Inv: ${item.invoiceNo}` : '';
+
+        await (tx.ledgerEntry as any).create({
+          data: {
+            id: crypto.randomUUID(),
+            party_id: String(party_id),
+            party_name: voucher.party_name || 'N/A',
+            party_type,
+            company_id,
+            date,
+            vch_type: type.toUpperCase(),
+            vch_no: voucher.voucher_no || voucher.id,
+            type: resolvedEntryType,
+            amount: netItemAmount,
+            balance: currentBalance,
+            description: `${mode}${ref}${invStr}`.trim() || type.toUpperCase(),
+            reference_id: String(voucher.id)
+          }
+        });
+      }
+
+      // 3b. Separate JOURNAL entry for item's TDS or other adjustments
+      if (itemAdjustment > 0) {
+        if (party_type === 'customer') {
+          currentBalance = type === 'receipt' ? (currentBalance - itemAdjustment) : (currentBalance + itemAdjustment);
+        } else if (party_type === 'vendor') {
+          currentBalance = type === 'payment' ? (currentBalance - itemAdjustment) : (currentBalance + itemAdjustment);
+        }
+
+        const adjType = item.adjustmentType || item.adjustment_type || 'TDS';
+        const invStr = item.invoiceNo ? ` - Inv: ${item.invoiceNo}` : '';
+
+        await (tx.ledgerEntry as any).create({
+          data: {
+            id: crypto.randomUUID(),
+            party_id: String(party_id),
+            party_name: voucher.party_name || 'N/A',
+            party_type,
+            company_id,
+            date,
+            vch_type: 'JOURNAL',
+            vch_no: voucher.voucher_no || voucher.id,
+            type: resolvedEntryType,
+            amount: itemAdjustment,
+            balance: currentBalance,
+            description: `${adjType}${invStr}`,
+            reference_id: String(voucher.id)
+          }
+        });
+      }
+    }
+
+    // 3c. Check if there is remaining unallocated voucher-level TDS
+    const totalVoucherTDS = parseFloat(String(voucher.tds_amount ?? '0')) || 0;
+    const remainingTDS = totalVoucherTDS - totalItemAdjustments;
+    if (remainingTDS > 0.5) {
+      if (party_type === 'customer') {
+        currentBalance = type === 'receipt' ? (currentBalance - remainingTDS) : (currentBalance + remainingTDS);
+      } else if (party_type === 'vendor') {
+        currentBalance = type === 'payment' ? (currentBalance - remainingTDS) : (currentBalance + remainingTDS);
+      }
+
+      await (tx.ledgerEntry as any).create({
+        data: {
+          id: crypto.randomUUID(),
+          party_id: String(party_id),
+          party_name: voucher.party_name || 'N/A',
+          party_type,
+          company_id,
+          date,
+          vch_type: 'JOURNAL',
+          vch_no: voucher.voucher_no || voucher.id,
+          type: resolvedEntryType,
+          amount: remainingTDS,
+          balance: currentBalance,
+          description: 'TDS Deducted',
+          reference_id: String(voucher.id)
+        }
+      });
+    }
+  } else {
+    // 3d. Fallback for vouchers without item breakdown
+    const ledgerAmount = parseFloat(String(voucher.amount || '0'));
+    if (party_type === 'customer') {
+      currentBalance = type === 'receipt' ? (currentBalance - ledgerAmount) : (currentBalance + ledgerAmount);
+    } else if (party_type === 'vendor') {
+      currentBalance = type === 'payment' ? (currentBalance - ledgerAmount) : (currentBalance + ledgerAmount);
+    }
+
+    const currentTDS = parseFloat(String(voucher.tds_amount || '0')) || 0;
+    const currentOthers = parseFloat(String(voucher.others_amount || '0')) || 0;
+
+    await (tx.ledgerEntry as any).create({
+      data: {
+        id: crypto.randomUUID(),
+        party_id: String(party_id),
+        party_name: voucher.party_name || 'N/A',
+        party_type,
+        company_id,
+        date,
+        vch_type: type.toUpperCase(),
+        vch_no: voucher.voucher_no || voucher.id,
+        type: resolvedEntryType,
+        amount: ledgerAmount,
+        balance: currentBalance,
+        description: (() => {
+          const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
+          const ref = (cheque_no || reference_no) ? ` (No. ${cheque_no || reference_no})` : '';
+          return `${mode}${ref}`.trim() || type.toUpperCase();
+        })(),
+        reference_id: String(voucher.id)
+      }
+    });
+
+    if (currentTDS > 0) {
+      if (party_type === 'customer') {
+        currentBalance = type === 'receipt' ? (currentBalance - currentTDS) : (currentBalance + currentTDS);
+      } else if (party_type === 'vendor') {
+        currentBalance = type === 'payment' ? (currentBalance - currentTDS) : (currentBalance + currentTDS);
+      }
+
+      await (tx.ledgerEntry as any).create({
+        data: {
+          id: crypto.randomUUID(),
+          party_id: String(party_id),
+          party_name: voucher.party_name || 'N/A',
+          party_type,
+          company_id,
+          date,
+          vch_type: 'JOURNAL',
+          vch_no: voucher.voucher_no || voucher.id,
+          type: resolvedEntryType,
+          amount: currentTDS,
+          balance: currentBalance,
+          description: `TDS Deducted${reference_no ? ` - ${reference_no}` : ''}`,
+          reference_id: String(voucher.id)
+        }
+      });
+    }
+
+    if (currentOthers > 0) {
+      if (party_type === 'customer') {
+        currentBalance = type === 'receipt' ? (currentBalance - currentOthers) : (currentBalance + currentOthers);
+      } else if (party_type === 'vendor') {
+        currentBalance = type === 'payment' ? (currentBalance - currentOthers) : (currentBalance + currentOthers);
+      }
+
+      await (tx.ledgerEntry as any).create({
+        data: {
+          id: crypto.randomUUID(),
+          party_id: String(party_id),
+          party_name: voucher.party_name || 'N/A',
+          party_type,
+          company_id,
+          date,
+          vch_type: 'JOURNAL',
+          vch_no: voucher.voucher_no || voucher.id,
+          type: resolvedEntryType,
+          amount: currentOthers,
+          balance: currentBalance,
+          description: `Adjustment Deducted${reference_no ? ` - ${reference_no}` : ''}`,
+          reference_id: String(voucher.id)
+        }
+      });
+    }
   }
 };
 
@@ -434,18 +566,15 @@ const revertInvoicesForVoucher = async (tx: any, voucher: any) => {
       if (exactIds.length > 0) {
         invoices = await (tx as any).legacyInvoice.findMany({
           where: {
-            AND: [
-              { id: { in: exactIds } },
-              { OR: [{ company_id: voucher.company_id ? String(voucher.company_id) : undefined }, { company_id: voucher.company_id ? String(voucher.company_id).toLowerCase() : undefined }] }
-            ]
+            id: { in: exactIds }
           }
         });
       } else {
         invoices = await (tx as any).legacyInvoice.findMany({
           where: {
-            AND: [
-              { OR: [{ invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
-              { OR: [{ company_id: voucher.company_id ? String(voucher.company_id) : undefined }, { company_id: voucher.company_id ? String(voucher.company_id).toLowerCase() : undefined }] }
+            OR: [
+              { invoice_no: { in: invNumsAsInts } },
+              { dc_no: { in: invNumbers } }
             ]
           }
         });
@@ -461,16 +590,22 @@ const revertInvoicesForVoucher = async (tx: any, voucher: any) => {
         if (remainingRevertAmount <= 0) break;
         const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
         const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
-        const currentGrandTotal = parseFloat(cleanGrand) || 0;
+        let currentGrandTotal = parseFloat(cleanGrand) || 0;
+        if (currentGrandTotal <= 0) {
+          const sub = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
+          const tax = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+          if (sub > 0) currentGrandTotal = sub + tax;
+        }
         const currentPaidAmount = parseFloat(cleanPaid) || 0;
         
         const revertForThisInvoice = Math.min(remainingRevertAmount, currentPaidAmount);
         if (revertForThisInvoice <= 0) continue; 
         
         const newPaidAmount = currentPaidAmount - revertForThisInvoice;
+        const isPaid = (currentGrandTotal > 0 && newPaidAmount >= (currentGrandTotal - 0.5));
         await (tx as any).legacyInvoice.update({
           where: { id: inv.id },
-          data: { paid_amount: String(Math.max(0, newPaidAmount)), status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED' }
+          data: { paid_amount: String(Math.max(0, newPaidAmount)), status: isPaid ? 'PAID' : 'BILLED' }
         });
         remainingRevertAmount -= revertForThisInvoice;
       }
@@ -536,18 +671,15 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
             if (exactIds.length > 0) {
               invoices = await (tx as any).legacyInvoice.findMany({
                 where: {
-                  AND: [
-                    { id: { in: exactIds } },
-                    { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
-                  ]
+                  id: { in: exactIds }
                 }
               });
             } else {
               invoices = await (tx as any).legacyInvoice.findMany({
                 where: {
-                  AND: [
-                    { OR: [{ invoice_no: { in: invNumsAsInts } }, { dc_no: { in: invNumbers } }] },
-                    { OR: [{ company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined }, { company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id).toLowerCase() : undefined }] }
+                  OR: [
+                    { invoice_no: { in: invNumsAsInts } },
+                    { dc_no: { in: invNumbers } }
                   ]
                 }
               });
@@ -557,120 +689,37 @@ export const updateVoucher = async (req: AuthRequest, res: Response) => {
             let remainingAmount = totalSettlementAmount;
             for (const inv of invoices) {
               if (remainingAmount <= 0) break;
-              const cleanGrand = String(inv.grand_total || '0').replace(/[^\d.]/g, '');
-              const cleanPaid  = String(inv.paid_amount  || '0').replace(/[^\d.]/g, '');
-              const currentGrandTotal = parseFloat(cleanGrand) || 0;
-              const currentPaidAmount = parseFloat(cleanPaid) || 0;
+              let currentGrandTotal = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+              if (currentGrandTotal <= 0) {
+                const sub = inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0);
+                const tax = inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0);
+                if (sub > 0) currentGrandTotal = sub + tax;
+              }
+              const currentPaidAmount = parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0;
               const balanceDue = currentGrandTotal - currentPaidAmount;
-              if (balanceDue <= 0.1) continue; 
-              const paymentForThisInvoice = Math.min(remainingAmount, balanceDue);
+              if (balanceDue <= 0.1 && currentGrandTotal > 0) {
+                if (inv.status !== 'PAID') {
+                  await (tx as any).legacyInvoice.update({
+                    where: { id: inv.id },
+                    data: { status: 'PAID' }
+                  });
+                }
+                continue; 
+              }
+              const paymentForThisInvoice = Math.min(remainingAmount, balanceDue > 0 ? balanceDue : remainingAmount);
               const newPaidAmount = currentPaidAmount + paymentForThisInvoice;
+              const isPaid = (currentGrandTotal > 0 && newPaidAmount >= (currentGrandTotal - 0.5)) || (currentGrandTotal <= 0 && newPaidAmount > 0);
               await (tx as any).legacyInvoice.update({
                 where: { id: inv.id },
-                data: { paid_amount: String(newPaidAmount), status: newPaidAmount >= (currentGrandTotal - 0.5) ? 'PAID' : 'BILLED' }
+                data: { paid_amount: String(newPaidAmount), status: isPaid ? 'PAID' : 'BILLED' }
               });
               remainingAmount -= paymentForThisInvoice;
             }
           }
         }
 
-        if (party_id) {
-          await (tx.ledgerEntry as any).deleteMany({
-            where: {
-              OR: [
-                { reference_id: String(oldVoucher.id) }, { reference_id: String(oldVoucher.voucher_no) }, { vch_no: String(oldVoucher.voucher_no) },
-                { reference_id: String(updatedVoucher.id) }, { reference_id: String(updatedVoucher.voucher_no) }, { vch_no: String(updatedVoucher.voucher_no) }
-              ]
-            }
-          });
-
-          const lastEntry = await (tx.ledgerEntry as any).findFirst({
-             where: { party_id: String(party_id), company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : undefined },
-             orderBy: { created_at: 'desc' }
-          });
-
-          const lastBalance = lastEntry ? (lastEntry.balance || 0) : 0;
-          let currentBalance = lastBalance;
-
-          const baseEntryType = type === 'receipt' ? 'credit' : 'debit';
-          const resolvedEntryType = (party_type === 'vendor' && type === 'payment') ? 'debit' : 
-                                    (party_type === 'vendor' && type === 'receipt') ? 'credit' : baseEntryType;
-
-          if (items && Array.isArray(items) && items.length > 0) {
-            for (const item of items) {
-              const itemAmount = parseFloat(String(item.amount || '0'));
-              const itemAdjustment = parseFloat(String(item.adjustmentValue || item.adjustment_value || '0'));
-              const netItemAmount = Math.max(0, itemAmount - itemAdjustment);
-              
-              if (netItemAmount <= 0) continue;
-
-              if (party_type === 'customer') {
-                currentBalance = type === 'receipt' ? (currentBalance - netItemAmount) : (currentBalance + netItemAmount);
-              } else if (party_type === 'vendor') {
-                currentBalance = type === 'payment' ? (currentBalance - netItemAmount) : (currentBalance + netItemAmount);
-              }
-
-              const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
-              const ref = cheque_no ? ` (No. ${cheque_no})` : '';
-              const invStr = item.invoiceNo ? ` - Inv: ${item.invoiceNo}` : '';
-              const adjType = item.adjustmentType || item.adjustment_type || 'Adj';
-              const adjStr = itemAdjustment > 0 ? ` (${adjType}: ₹${itemAdjustment})` : '';
-
-              await (tx.ledgerEntry as any).create({
-                data: {
-                  id: crypto.randomUUID(),
-                  party_id: String(party_id),
-                  party_name: party_name || 'N/A',
-                  party_type: party_type || 'customer',
-                  company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : null,
-                  date: date ? new Date(date) : new Date(),
-                  vch_type: type.toUpperCase(),
-                  vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
-                  type: resolvedEntryType,
-                  amount: netItemAmount,
-                  balance: currentBalance,
-                  description: `${mode}${ref}${invStr}${adjStr}`,
-                  reference_id: String(updatedVoucher.id)
-                }
-              });
-            }
-          } else {
-            // Fallback
-            const ledgerAmount = newAmount;
-            if (party_type === 'customer') {
-              currentBalance = type === 'receipt' ? (currentBalance - ledgerAmount) : (currentBalance + ledgerAmount);
-            } else if (party_type === 'vendor') {
-              currentBalance = type === 'payment' ? (currentBalance - ledgerAmount) : (currentBalance + ledgerAmount);
-            }
-
-            const currentTDS = parseFloat(String(tds_amount ?? tdsAmount ?? oldVoucher.tds_amount ?? '0')) || 0;
-            const currentOthers = parseFloat(String(others_amount ?? othersAmount ?? oldVoucher.others_amount ?? '0')) || 0;
-
-            await (tx.ledgerEntry as any).create({
-              data: {
-                id: crypto.randomUUID(),
-                party_id: String(party_id),
-                party_name: party_name || 'N/A',
-                party_type: party_type || 'customer',
-                company_id: updatedVoucher.company_id ? String(updatedVoucher.company_id) : null,
-                date: date ? new Date(date) : new Date(),
-                vch_type: type.toUpperCase(),
-                vch_no: updatedVoucher.voucher_no || updatedVoucher.id,
-                type: resolvedEntryType,
-                amount: ledgerAmount,
-                balance: currentBalance,
-                description: (() => {
-                  const mode = payment_mode ? String(payment_mode).toUpperCase() : '';
-                  const ref = (cheque_no || reference_no) ? ` (No. ${cheque_no || reference_no})` : '';
-                  const tdsLabel = currentTDS > 0 ? ` (TDS: ₹${currentTDS})` : '';
-                  const othersLabel = currentOthers > 0 ? ` (Others: ₹${currentOthers})` : '';
-                  return `${mode}${ref}${tdsLabel}${othersLabel}`;
-                })(),
-                reference_id: String(updatedVoucher.id)
-              }
-            });
-          }
-        }
+        // 3. UPDATE LEDGER
+        await syncLedgerForVoucher(tx, updatedVoucher, items, oldVoucher);
         return updatedVoucher;
       }, {
         maxWait: 15000,

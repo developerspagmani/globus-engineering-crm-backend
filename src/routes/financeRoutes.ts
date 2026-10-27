@@ -69,6 +69,7 @@ router.get('/invoices', checkPermission('mod_invoice', 'canRead') as any, invoic
 router.get('/invoices/next-numbers', checkPermission('mod_invoice', 'canRead') as any, invoiceController.getNextNumbers);
 router.post('/invoices', checkPermission('mod_invoice', 'canCreate') as any, invoiceController.createInvoice);
 router.put('/invoices/:id', checkPermission('mod_invoice', 'canEdit') as any, invoiceController.updateInvoice);
+router.patch('/invoices/:id/toggle-status', checkPermission('mod_invoice', 'canEdit') as any, invoiceController.toggleInvoiceStatus);
 router.delete('/invoices/:id', checkPermission('mod_invoice', 'canDelete') as any, invoiceController.deleteInvoice);
 
 /**

@@ -373,6 +373,8 @@ model LedgerEntry {
   vch_type     String?   @db.VarChar(50)
   vch_no       String?   @db.VarChar(50)
 
+  @@index([company_id, party_id, date])
+  @@index([party_id, date])
   @@map("app_ledger_entries")
 }
 

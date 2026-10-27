@@ -35,6 +35,8 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   let limit = requestedLimit || 10;
   if (rawInvoiceNos || req.query.type === 'selection') {
     limit = 300;
+  } else if (req.query.status === 'pending') {
+    limit = Math.min(requestedLimit || 1000, 1000);
   } else if (requestedLimit) {
     limit = Math.min(requestedLimit, 200);
   }
@@ -226,7 +228,7 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
               { invoice_date: { gte: cutoffDate } },
               {
                 status: {
-                  notIn: ['PAID', 'COMPLETED', 'CANCELLED', 'cancelled', 'paid', 'completed']
+                  notIn: ['PAID', 'COMPLETED', 'CANCELLED', 'cancelled', 'paid', 'completed', 'CLOSED', 'closed', 'SETTLED', 'settled']
                 }
               }
             ]
@@ -237,6 +239,9 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
           });
           statusIds = allInvoices
               .filter(inv => {
+                  const st = (inv.status || '').toUpperCase().trim();
+                  if (st === 'PAID' || st === 'COMPLETED' || st === 'CANCELLED' || st === 'CLOSED' || st === 'SETTLED') return false;
+
                   const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
                   const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
                   const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
@@ -250,7 +255,8 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
       } else if (statusType === 'paid') {
           statusIds = allInvoices
               .filter(inv => {
-                  if (inv.status === 'PAID' || inv.status === 'COMPLETED') return true;
+                  const st = (inv.status || '').toUpperCase().trim();
+                  if (st === 'PAID' || st === 'COMPLETED' || st === 'CLOSED' || st === 'SETTLED') return true;
                   const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
                   const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
                   const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
@@ -261,7 +267,13 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
               })
               .map(inv => inv.id);
       } else {
-          filteredWhere.AND.push({ status: status.toUpperCase() });
+          filteredWhere.AND.push({
+            OR: [
+              { status: status.toUpperCase() },
+              { status: status.toLowerCase() },
+              { status }
+            ]
+          });
       }
 
       if (statusType === 'pending' || statusType === 'paid') {
@@ -382,7 +394,16 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
           const parsedItems = JSON.parse(inv.items_json || '[]');
           return Math.round(parsedItems.reduce((s: number, i: any) => s + ((parseFloat(String(i.quantity ?? i.qty ?? '0')) || 0) * (parseFloat(String(i.unitPrice ?? i.unit_price ?? i.price ?? '0')) || 0)), 0) * 100) / 100;
         })(),
-        grandTotal: parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0,
+        grandTotal: (() => {
+          let grand = parseFloat(String(inv.grand_total || '0').replace(/[^\d.]/g, '')) || 0;
+          if (grand <= 0) {
+            const isWop = inv.bill_type === 'without_process' || String(inv.bill_type).toLowerCase().includes('without');
+            const taxable = isWop ? 0 : (inv.sub_total ?? (parseFloat(String(inv.total || '0').replace(/[^\d.]/g, '')) || 0));
+            const taxVal  = isWop ? 0 : (inv.tax_total ?? (parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0));
+            if (taxable > 0) grand = taxable + taxVal;
+          }
+          return grand;
+        })(),
         paidAmount: parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0,
         discount: parseFloat(String(inv.discount || '0').replace(/[^\d.]/g, '')) || 0,
         gstin: inv.gstin || '',
@@ -1414,4 +1435,45 @@ export const getNextNumbers = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to get next numbers', detail: error.message });
   }
 };
+
+export const toggleInvoiceStatus = async (req: AuthRequest, res: Response) => {
+  const user = req.user;
+  if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+  const { id } = req.params;
+  const { status } = req.body;
+
+  try {
+    const invoiceId = parseInt(String(id), 10);
+    if (isNaN(invoiceId)) {
+      return res.status(400).json({ error: 'Invalid invoice ID' });
+    }
+
+    const invoice = await prisma.legacyInvoice.findUnique({
+      where: { id: invoiceId }
+    });
+
+    if (!invoice) {
+      return res.status(404).json({ error: 'Invoice not found' });
+    }
+
+    const currentStatus = (invoice.status || '').toUpperCase().trim();
+    const newStatus = status ? status.toUpperCase().trim() : (currentStatus === 'CLOSED' ? 'BILLED' : 'CLOSED');
+
+    const updated = await prisma.legacyInvoice.update({
+      where: { id: invoiceId },
+      data: { status: newStatus }
+    });
+
+    return res.json({
+      success: true,
+      id: updated.id,
+      invoiceNumber: updated.invoice_no,
+      status: updated.status
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: 'Failed to update invoice status', detail: error.message });
+  }
+};
+
 

@@ -38,10 +38,30 @@ app.use('/api', apiRoutes);
 // Initial Database connection test removed from server start for serverless compatibility.
 // Serverless functions start up quickly; Prisma handles connections on the first query.
 
+async function ensureDatabaseIndexes() {
+  try {
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX idx_ledger_comp_party_date ON app_ledger_entries (company_id, party_id, date)`
+    );
+  } catch (e) {
+    // Index already exists or not supported
+  }
+  try {
+    await prisma.$executeRawUnsafe(
+      `CREATE INDEX idx_ledger_party_date ON app_ledger_entries (party_id, date)`
+    );
+  } catch (e) {
+    // Index already exists or not supported
+  }
+}
+
 if (process.env.NODE_ENV !== 'production' || process.env.VERCEL !== '1') {
   app.listen(PORT, () => {
     console.log(`🚀 MVC Backend running on http://localhost:${PORT}`);
     
+    // Ensure critical database indexes for ledger performance
+    ensureDatabaseIndexes().catch(() => {});
+
     // Start email reminder cron job
     const emailService = EmailReminderService.getInstance();
     emailService.startCronJob();
