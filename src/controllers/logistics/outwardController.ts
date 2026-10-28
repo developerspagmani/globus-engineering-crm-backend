@@ -130,9 +130,14 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
       ...e,
       outwardNo: e.outward_no,
       partyType: e.party_type,
+      customerId: e.customer_id,
       customerName: e.customer_name,
+      vendorId: e.vendor_id,
       vendorName: e.vendor_name,
       processName: e.process_name,
+      coatingName: e.coating_name,
+      purpose: e.purpose,
+      notes: e.notes,
       invoiceReference: e.invoice_reference,
       challanNo: e.challan_no,
       vehicleNo: e.vehicle_no,
@@ -342,17 +347,17 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
       const updatedEntry = await (tx.outwardEntry as any).update({
         where: { id: String(id) },
         data: {
-          outward_no,
-          party_type,
-          customer_id,
-          customer_name,
-          vendor_id,
-          vendor_name,
-          process_name,
-          invoice_reference,
-          challan_no,
+          outward_no: finalOutwardNo,
+          party_type: finalPartyType,
+          customer_id: customer_id !== undefined ? customer_id : customerId,
+          customer_name: customer_name !== undefined ? customer_name : customerName,
+          vendor_id: finalVendorId,
+          vendor_name: finalVendorName,
+          process_name: finalProcessName,
+          invoice_reference: invoice_reference !== undefined ? invoice_reference : invoiceReference,
+          challan_no: challan_no !== undefined ? challan_no : challanNo,
           vehicle_no: vehicle_no !== undefined ? vehicle_no : (vehicleNo !== undefined ? vehicleNo : undefined),
-          driver_name,
+          driver_name: driver_name !== undefined ? driver_name : driverName,
           notes,
           status,
           coating_name: coating_name || coatingName,
@@ -473,13 +478,69 @@ export const getOutwardById = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Outward entry not found' });
     }
 
+    let address = '';
+    let gstin = '';
+    let phone = '';
+    let pan = '';
+
+    if (entry.party_type === 'vendor' || entry.vendor_id) {
+      let vend = null;
+      if (entry.vendor_id) {
+        vend = await prisma.vendor.findUnique({
+          where: { id: String(entry.vendor_id) }
+        });
+      }
+      if (!vend && entry.vendor_name) {
+        vend = await prisma.vendor.findFirst({
+          where: { name: entry.vendor_name }
+        });
+      }
+      if (vend) {
+        const parts = [vend.street1, vend.street2, vend.area, vend.city, vend.state, vend.pin_code].filter(Boolean);
+        address = parts.join(', ');
+        gstin = vend.gst || (vend as any).gstin || '';
+        phone = vend.phone || '';
+        pan = (vend as any).pan || '';
+      }
+    } else {
+      let cust = null;
+      if (entry.customer_id) {
+        const parsedCId = parseInt(entry.customer_id, 10);
+        if (!isNaN(parsedCId)) {
+          cust = await prisma.legacyCustomer.findUnique({
+            where: { id: parsedCId }
+          });
+        }
+      }
+      if (!cust && entry.customer_name) {
+        cust = await prisma.legacyCustomer.findFirst({
+          where: { customer_name: entry.customer_name }
+        });
+      }
+      if (cust) {
+        const parts = [cust.street1, cust.street2, cust.area, cust.city, cust.state, cust.pin_code].filter(Boolean);
+        address = parts.join(', ');
+        gstin = cust.gst || '';
+        phone = cust.phone || '';
+      }
+    }
+
     res.json({
       ...entry,
       outwardNo: entry.outward_no,
       partyType: entry.party_type,
+      customerId: entry.customer_id,
       customerName: entry.customer_name,
+      vendorId: entry.vendor_id,
       vendorName: entry.vendor_name,
       processName: entry.process_name,
+      coatingName: entry.coating_name,
+      purpose: entry.purpose,
+      notes: entry.notes,
+      address,
+      gstin,
+      phone,
+      pan,
       invoiceReference: entry.invoice_reference,
       challanNo: entry.challan_no,
       vehicleNo: entry.vehicle_no,

@@ -16,8 +16,8 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
   const search = (req.query.search as string || '').toLowerCase();
   const sortBy = req.query.sortBy as string;
   const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
-  const fromDate = req.query.fromDate as string;
-  const toDate = req.query.toDate as string;
+  const fromDate = (req.query.fromDate as string || '').trim();
+  const toDate = (req.query.toDate as string || '').trim();
   const companyName = (req.query.companyName as string || req.query.company_name as string || '').trim();
   const invoiceNo = (req.query.invoiceNo as string || req.query.invoice_no as string || '').trim();
   const dcNo = (req.query.dcNo as string || req.query.dc_no as string || req.query.challan as string || '').trim();
@@ -74,13 +74,23 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
 
     if (fromDate || toDate) {
       const dateFilter: any = {};
-      if (fromDate) dateFilter.gte = new Date(fromDate);
-      if (toDate) {
-        const endOfDay = new Date(toDate);
-        endOfDay.setHours(23, 59, 59, 999);
-        dateFilter.lte = endOfDay;
+      if (fromDate) {
+        const cleanFrom = fromDate.split('T')[0];
+        const d = new Date(`${cleanFrom}T00:00:00.000Z`);
+        if (!isNaN(d.getTime())) {
+          dateFilter.gte = d;
+        }
       }
-      where.AND.push({ received_date: dateFilter });
+      if (toDate) {
+        const cleanTo = toDate.split('T')[0];
+        const d = new Date(`${cleanTo}T23:59:59.999Z`);
+        if (!isNaN(d.getTime())) {
+          dateFilter.lte = d;
+        }
+      }
+      if (Object.keys(dateFilter).length > 0) {
+        where.AND.push({ received_date: dateFilter });
+      }
     }
 
     const [purchaseBills, totalCount] = await Promise.all([
