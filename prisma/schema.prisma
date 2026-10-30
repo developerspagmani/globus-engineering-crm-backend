@@ -349,6 +349,7 @@ model OutwardEntry {
   process_name      String?   @db.VarChar(255)
   driver_name       String?   @db.VarChar(100)
   notes             String?   @db.Text
+  customer_notes    String?   @db.Text
   amount            Float?    @default(0)
   coating_name      String?   @db.VarChar(255)
   purpose           String?   @db.VarChar(255)

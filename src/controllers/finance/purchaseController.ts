@@ -93,15 +93,41 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    const [purchaseBills, totalCount] = await Promise.all([
+    const [purchaseBills, totalCount, aggregateData] = await Promise.all([
       prisma.purchaseBill.findMany({
         where,
         skip,
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : { received_date: 'desc' }
       }),
-      prisma.purchaseBill.count({ where })
+      prisma.purchaseBill.count({ where }),
+      prisma.purchaseBill.aggregate({
+        where,
+        _sum: {
+          amount: true,
+          cgst: true,
+          sgst: true,
+          igst: true,
+          round_off: true,
+          tds: true,
+          grand_total: true
+        }
+      })
     ]);
+
+    const totalTaxable = aggregateData._sum.amount || 0;
+    const totalCgst = aggregateData._sum.cgst || 0;
+    const totalSgst = aggregateData._sum.sgst || 0;
+    const totalCgstSgst = totalCgst + totalSgst;
+    const totalIgst = aggregateData._sum.igst || 0;
+    const totalRoundOff = aggregateData._sum.round_off || 0;
+    const totalTds = aggregateData._sum.tds || 0;
+    let totalGrand = aggregateData._sum.grand_total || 0;
+
+    // Fallback: If totalGrand is zero but we have taxable total, reconstruct the grand total
+    if (totalGrand <= 0 && totalTaxable > 0) {
+      totalGrand = totalTaxable + totalCgstSgst + totalIgst + totalRoundOff - totalTds;
+    }
 
     res.json({
       items: purchaseBills.map(pb => ({
@@ -118,7 +144,8 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
         sgst: pb.sgst,
         igst: pb.igst,
         roundOff: pb.round_off,
-        grandTotal: pb.grand_total,
+        tds: pb.tds,
+        grandTotal: pb.grand_total > 0 ? pb.grand_total : ((pb.amount || 0) + (pb.cgst || 0) + (pb.sgst || 0) + (pb.igst || 0) + (pb.round_off || 0) - (pb.tds || 0)),
         company_id: pb.company_id,
         vendorId: pb.vendor_id,
         customerId: pb.customer_id
@@ -128,6 +155,16 @@ export const getAllPurchaseBills = async (req: AuthRequest, res: Response) => {
         itemsPerPage: limit,
         totalItems: totalCount,
         totalPages: Math.ceil(totalCount / limit)
+      },
+      aggregates: {
+        totalTaxable,
+        totalCgst,
+        totalSgst,
+        totalCgstSgst,
+        totalIgst,
+        totalRoundOff,
+        totalTds,
+        totalGrand
       }
     });
   } catch (err: any) {
@@ -238,8 +275,10 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
     const cleanRoundOff = parseFloat(String(roundOff || '0')) || 0;
     const cleanTds = parseFloat(String(tds || '0')) || 0;
     
-    // Auto-calculate grand total
-    const cleanGrandTotal = cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff - cleanTds;
+    // Auto-calculate grand total if not explicitly provided
+    const cleanGrandTotal = (req.body.grandTotal !== undefined && req.body.grandTotal !== null)
+      ? (parseFloat(String(req.body.grandTotal)) || 0)
+      : (cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff - cleanTds);
 
     const newBill = await prisma.purchaseBill.create({
       data: {
@@ -278,6 +317,7 @@ export const createPurchaseBill = async (req: AuthRequest, res: Response) => {
       sgst: newBill.sgst,
       igst: newBill.igst,
       roundOff: newBill.round_off,
+      tds: newBill.tds,
       grandTotal: newBill.grand_total,
       company_id: newBill.company_id,
       vendorId: newBill.vendor_id,
@@ -324,8 +364,10 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
     const cleanRoundOff = roundOff !== undefined ? (parseFloat(String(roundOff || '0')) || 0) : existing.round_off;
     const cleanTds = tds !== undefined ? (parseFloat(String(tds || '0')) || 0) : existing.tds;
 
-    // Auto-calculate grand total
-    const cleanGrandTotal = cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff - cleanTds;
+    // Auto-calculate grand total if not explicitly provided
+    const cleanGrandTotal = (req.body.grandTotal !== undefined && req.body.grandTotal !== null)
+      ? (parseFloat(String(req.body.grandTotal)) || 0)
+      : (cleanAmount + cleanCgst + cleanSgst + cleanIgst + cleanRoundOff - cleanTds);
 
     const updatedBill = await prisma.purchaseBill.update({
       where: { id },
@@ -363,9 +405,11 @@ export const updatePurchaseBill = async (req: AuthRequest, res: Response) => {
       sgst: updatedBill.sgst,
       igst: updatedBill.igst,
       roundOff: updatedBill.round_off,
+      tds: updatedBill.tds,
       grandTotal: updatedBill.grand_total,
       company_id: updatedBill.company_id,
-      vendorId: updatedBill.vendor_id
+      vendorId: updatedBill.vendor_id,
+      customerId: updatedBill.customer_id
     });
   } catch (err: any) {
     console.error('Error updating purchase bill:', err);

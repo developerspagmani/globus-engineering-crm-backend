@@ -351,6 +351,24 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
     );
 
     const parsedInvoices = await Promise.all(invoices.map(async (inv: any) => {
+      const cleanStr = (val: any): string => {
+        if (val === null || val === undefined) return '';
+        const str = String(val).trim();
+        return str.toLowerCase() === 'null' ? '' : str;
+      };
+      const liveAddressParts = inv.customer ? [
+        cleanStr(inv.customer.street1),
+        cleanStr(inv.customer.street2),
+        cleanStr(inv.customer.city),
+        cleanStr(inv.customer.state),
+        cleanStr(inv.customer.pin_code)
+      ].filter(Boolean) : [];
+      const liveCustomerAddress = liveAddressParts.join(', ');
+      const resolvedCustomerName = cleanStr(inv.customer?.customer_name) || cleanStr(inv.customer_name) || 'N/A';
+      const resolvedAddress = liveCustomerAddress || cleanStr(inv.address) || '';
+      const resolvedGstin = inv.customer ? (cleanStr(inv.customer.gst) || cleanStr(inv.gstin)) : cleanStr(inv.gstin);
+      const resolvedState = inv.customer ? (cleanStr(inv.customer.state) || cleanStr(inv.state)) : cleanStr(inv.state);
+
       const base = { ...inv };
       const mapped = {
         ...base,
@@ -359,7 +377,9 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         date: inv.invoice_date,
         dueDate: inv.due_date,
         customerId: inv.customer_id?.toString(),
-        customerName: inv.customer_name || inv.customer?.customer_name || 'N/A',
+        customerName: resolvedCustomerName,
+        customer_name: resolvedCustomerName,
+        address: resolvedAddress,
         poNo: inv.po_no || '',
         poDate: inv.po_date,
         dcNo: inv.dc_no || '',
@@ -406,8 +426,10 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
         })(),
         paidAmount: parseFloat(String(inv.paid_amount || '0').replace(/[^\d.]/g, '')) || 0,
         discount: parseFloat(String(inv.discount || '0').replace(/[^\d.]/g, '')) || 0,
-        gstin: inv.gstin || '',
-        state: inv.state || '',
+        gstin: resolvedGstin,
+        state: resolvedState,
+        stateCode: inv.customer?.state_code || '',
+        state_code: inv.customer?.state_code || '',
         status: inv.status || 'DRAFT',
         taxTotal: (() => {
             let t = parseFloat(String(inv.tax_total || '0').replace(/[^\d.]/g, '')) || 0;
@@ -773,7 +795,8 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
           data: {
             ...invoiceData,
             inward_no: actualInwardNo || invNo // Use actual inward no if found, fallback to invoice no for legacy compatibility
-          }
+          },
+          include: { customer: true }
         });
 
         // Update Inward status if linked
@@ -1188,7 +1211,8 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             state: state,
             notes: notes,
             ...taxUpdate
-          }
+          },
+          include: { customer: true }
         });
 
         // Smart Status Update for Inward if linked

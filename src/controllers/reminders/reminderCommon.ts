@@ -33,10 +33,10 @@ export const formatINR = (amount: number): string => {
  * Prepare dynamic invoice PDF Buffer
  */
 export async function prepareInvoicePDF(invoice: any): Promise<Buffer> {
-  const resolvedCustomerName = cleanStr(invoice.customer_name) || cleanStr(invoice.customer?.customer_name) || 'Customer';
+  const resolvedCustomerName = cleanStr(invoice.customer?.customer_name) || cleanStr(invoice.customer_name) || 'Customer';
   
-  let resolvedCustomerAddress = cleanStr(invoice.address);
-  if (!resolvedCustomerAddress && invoice.customer) {
+  let resolvedCustomerAddress = '';
+  if (invoice.customer) {
     const parts = [
       cleanStr(invoice.customer.street1),
       cleanStr(invoice.customer.street2),
@@ -48,10 +48,14 @@ export async function prepareInvoicePDF(invoice: any): Promise<Buffer> {
     }
     resolvedCustomerAddress = parts.join(', ');
   }
+  if (!resolvedCustomerAddress) {
+    resolvedCustomerAddress = cleanStr(invoice.address);
+  }
   if (!resolvedCustomerAddress) resolvedCustomerAddress = 'N/A';
 
-  const resolvedCustomerGst = cleanStr(invoice.gstin) || cleanStr(invoice.customer?.gst) || 'N/A';
-  const resolvedState = cleanStr(invoice.state) || cleanStr(invoice.customer?.state) || 'Tamilnadu';
+  const resolvedCustomerGst = cleanStr(invoice.customer?.gst) || cleanStr(invoice.gstin) || 'N/A';
+  const resolvedState = cleanStr(invoice.customer?.state) || cleanStr(invoice.state) || '';
+  const resolvedStateCode = cleanStr(invoice.stateCode) || cleanStr(invoice.state_code) || cleanStr(invoice.customer?.state_code) || '';
 
   // Fetch company details dynamically based on invoice.company_id
   let companyObj = null;
@@ -123,6 +127,7 @@ export async function prepareInvoicePDF(invoice: any): Promise<Buffer> {
     logoSecondary: companyObj?.logo_secondary || undefined,
     taxRate: Number(invoice.tax_rate || 18),
     state: resolvedState,
+    stateCode: resolvedStateCode,
     billType: invoice.bill_type || 'with_process'
   });
 }

@@ -50,6 +50,66 @@ export const getAllLeads = async (req: AuthRequest, res: Response) => {
   const sortOrder = (req.query.sortOrder as string) === 'asc' ? 'asc' : 'desc';
 
   try {
+    // Sync any customers with status 'lead' into app_leads if not already present
+    try {
+      const leadCustomersWhere: any = {
+        status: 'lead'
+      };
+      if (companyId) {
+        leadCustomersWhere.OR = [
+          { company_id: String(companyId) },
+          { company_id: String(companyId).toLowerCase() },
+          { company_id: String(companyId).toUpperCase() },
+          { company_id: '' },
+          { company_id: null }
+        ];
+      }
+
+      const leadCustomers = await prisma.legacyCustomer.findMany({
+        where: leadCustomersWhere
+      });
+
+      if (leadCustomers.length > 0) {
+        const expectedLeadIds = leadCustomers.map(c => `cust_${c.id}`);
+        const existingLeads = await prisma.lead.findMany({
+          where: { id: { in: expectedLeadIds } },
+          select: { id: true, company_id: true }
+        });
+        const existingLeadMap = new Map(existingLeads.map(l => [l.id, l]));
+
+        for (const c of leadCustomers) {
+          const leadId = `cust_${c.id}`;
+          const resolvedCompanyId = c.company_id || (companyId ? String(companyId) : (user?.company_id || null));
+          const existing = existingLeadMap.get(leadId);
+          if (!existing) {
+            await prisma.lead.create({
+              data: {
+                id: leadId,
+                name: c.contact_person1 || c.customer_name || 'Prospect',
+                company: c.customer_name || c.contact_person1 || 'Company',
+                email: c.email || c.email_id1 || c.email_id2 || c.email_id3 || '',
+                phone: c.phone || c.phone_number1 || c.phone_number2 || c.phone_number3 || '-',
+                industry: c.industry || 'Automotive',
+                source: 'Web',
+                status: 'new',
+                agent_id: c.agent_id || user?.id || null,
+                company_id: resolvedCompanyId,
+                assigned_area: c.area || c.city || '',
+                created_at: c.app_created_at || new Date()
+              }
+            }).catch(() => {});
+          } else if (!existing.company_id && resolvedCompanyId) {
+            await prisma.lead.update({
+              where: { id: leadId },
+              data: { company_id: resolvedCompanyId }
+            }).catch(() => {});
+          }
+        }
+      }
+    } catch (syncErr) {
+      console.error('Error syncing lead customers into leads:', syncErr);
+    }
+
     const where: any = {
       AND: []
     };
@@ -260,29 +320,44 @@ export const getLeadById = async (req: AuthRequest, res: Response) => {
 };
 
 export const createLead = async (req: AuthRequest, res: Response) => {
-  const { id, name, email, phone, company, industry, source, status, notes, assigned_area, product_interest, next_visit_date, agentId, agent_id } = req.body;
+  const { id, name, email, phone, company, industry, source, status, notes, assigned_area, assignedArea, product_interest, next_visit_date, agentId, agent_id, company_id, companyId } = req.body;
   
   // Validation for mandatory fields
   if (!name) return res.status(400).json({ error: 'Lead name is mandatory' });
-  if (!phone) return res.status(400).json({ error: 'Phone number is mandatory' });
+  const isCustomerLead = typeof id === 'string' && id.startsWith('cust_');
+  if (!phone && !isCustomerLead) return res.status(400).json({ error: 'Phone number is mandatory' });
 
   const user = req.user;
+  const resolvedCompanyId = company_id || companyId || user?.company_id;
+  const leadId = id || crypto.randomUUID();
+  const resolvedArea = assigned_area ?? assignedArea;
 
   try {
-    const lead = await prisma.lead.create({
-      data: {
-        id: id || crypto.randomUUID(),
+    const lead = await prisma.lead.upsert({
+      where: { id: leadId },
+      update: {
         name,
         email,
-        phone,
-        company,
-        industry,
-        source,
+        phone: phone || '-',
+        company: company || name,
+        industry: industry || 'Automotive',
+        assigned_area: resolvedArea || undefined,
+        agent_id: agentId || agent_id || user?.id || undefined,
+        company_id: resolvedCompanyId || undefined
+      },
+      create: {
+        id: leadId,
+        name,
+        email,
+        phone: phone || '-',
+        company: company || name,
+        industry: industry || 'Automotive',
+        source: source || 'Web',
         status: status || 'new',
         agent_id: agentId || agent_id || user?.id,
-        company_id: user?.company_id,
+        company_id: resolvedCompanyId,
         notes,
-        assigned_area,
+        assigned_area: resolvedArea,
         product_interest,
         next_visit_date: next_visit_date ? new Date(next_visit_date) : null
       }
@@ -307,14 +382,15 @@ export const createLead = async (req: AuthRequest, res: Response) => {
 
 export const updateLead = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
-  const { name, email, phone, company, industry, source, status, notes, assigned_area, product_interest, next_visit_date, agentId, agent_id } = req.body;
+  const { name, email, phone, company, industry, source, status, notes, assigned_area, assignedArea, product_interest, next_visit_date, agentId, agent_id } = req.body;
   
   // Validation for mandatory fields if provided
   if (name !== undefined && !name) return res.status(400).json({ error: 'Lead name is mandatory' });
-  if (phone !== undefined && !phone) return res.status(400).json({ error: 'Phone number is mandatory' });
+  if (phone !== undefined && !phone && !id.startsWith('cust_')) return res.status(400).json({ error: 'Phone number is mandatory' });
 
   try {
     const newNextVisitDate = next_visit_date ? new Date(next_visit_date) : null;
+    const resolvedArea = assigned_area ?? assignedArea;
 
     const lead = await prisma.lead.update({
       where: { id },
@@ -327,12 +403,36 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
         source, 
         status, 
         notes,
-        assigned_area,
+        assigned_area: resolvedArea,
         product_interest,
         agent_id: agentId || agent_id || undefined,
         next_visit_date: newNextVisitDate
       }
     });
+
+    if (id.startsWith('cust_')) {
+      const parsedCustId = parseInt(id.replace(/^cust_/, ''), 10);
+      if (!isNaN(parsedCustId)) {
+        const custUpdate: any = {
+          customer_name: company || name,
+          contact_person1: name,
+          email,
+          phone,
+          industry,
+          area: resolvedArea
+        };
+        if (agentId || agent_id) {
+          custUpdate.agent_id = agentId || agent_id;
+        }
+        if (status === 'converted') {
+          custUpdate.status = 'active';
+        }
+        await prisma.legacyCustomer.update({
+          where: { id: parsedCustId },
+          data: custUpdate
+        }).catch(() => {});
+      }
+    }
 
     const mappedLead = {
       ...lead,
@@ -353,7 +453,18 @@ export const updateLead = async (req: AuthRequest, res: Response) => {
 export const deleteLead = async (req: AuthRequest, res: Response) => {
   const id = req.params.id as string;
   try {
-    await prisma.lead.delete({ where: { id } });
+    await prisma.lead.deleteMany({ where: { id } });
+
+    if (id.startsWith('cust_')) {
+      const parsedCustId = parseInt(id.replace(/^cust_/, ''), 10);
+      if (!isNaN(parsedCustId)) {
+        await prisma.legacyCustomer.updateMany({
+          where: { id: parsedCustId, status: 'lead' },
+          data: { status: 'inactive' }
+        }).catch(() => {});
+      }
+    }
+
     res.json({ message: 'Lead deleted successfully' });
   } catch (error: any) {
     res.status(500).json({ error: 'Failed to delete lead', detail: error.message });
@@ -372,4 +483,3 @@ export const sendLeadVisitReminder = async (req: AuthRequest, res: Response) => 
     res.status(400).json({ error: err.message || 'Failed to send visit reminder' });
   }
 };
-

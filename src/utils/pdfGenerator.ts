@@ -23,6 +23,7 @@ export interface InvoicePDFData {
   grandTotal: number;
   taxRate?: number;
   state?: string;
+  stateCode?: string;
   billType?: string;
 
   // Custom Company Details (dynamic from DB)
@@ -117,12 +118,14 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
     const billTypeClean = (data.billType || '').toLowerCase();
     const isWOP = billTypeClean.includes('without') || billTypeClean === 'wop' || billTypeClean === 'without_process';
     
-    // State and State code determination
-    const targetState = data.state || 'Tamilnadu';
-    const isIntraState = targetState.toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
+    // State and State code determination (only show customer stateCode if set in Customer; do not default to '33')
+    const targetState = (data.state || '').trim();
+    const isIntraState = !targetState || targetState.toLowerCase().replace(/[^a-z]/g, '') === 'tamilnadu';
     const taxRate = data.taxRate || 18;
-    const recipientCode = targetState.toLowerCase().replace(/[^a-z]/g, '') === 'telangana' ? '36' : (isIntraState ? '33' : '33'); // default recipient state code to 33 if tamilnadu/other
-    const stateLabel = isIntraState ? 'TamilNadu-33' : `${targetState.charAt(0).toUpperCase() + targetState.slice(1)}-${recipientCode}`;
+    const recipientCode = (data.stateCode || '').trim();
+    const stateLabel = targetState
+      ? (recipientCode ? `${targetState.charAt(0).toUpperCase() + targetState.slice(1)}-${recipientCode}` : `${targetState.charAt(0).toUpperCase() + targetState.slice(1)}`)
+      : (recipientCode || 'N/A');
 
     // Format currency function
     const formatCurrency = (val: number) => {
@@ -274,8 +277,10 @@ export const generateInvoicePDF = (data: InvoicePDFData): Promise<Buffer> => {
       doc.text('GST No', leftX + width / 2 + 5, addrY + 40);
       doc.font('Helvetica-Bold').text(`: ${data.customerGst || 'N/A'}`, leftX + width / 2 + 50, addrY + 40);
       doc.font('Helvetica').text('State', leftX + width / 2 + 5, addrY + 52);
-      doc.text(`: ${(data.state || 'N/A').toUpperCase()}`, leftX + width / 2 + 50, addrY + 52);
-      doc.text(`Code : ${recipientCode}`, leftX + width / 2 + 180, addrY + 52);
+      doc.text(`: ${(targetState || 'N/A').toUpperCase()}`, leftX + width / 2 + 50, addrY + 52);
+      if (recipientCode) {
+        doc.text(`Code : ${recipientCode}`, leftX + width / 2 + 180, addrY + 52);
+      }
 
       // Vertical line separating supplier & recipient
       doc.moveTo(leftX + width / 2, y).lineTo(leftX + width / 2, y + 65).stroke();

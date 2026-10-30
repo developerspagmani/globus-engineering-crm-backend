@@ -4,6 +4,17 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 import { generateNextSequence } from '../../utils/sequenceGenerator';
 
+let customerNotesColumnEnsured = false;
+async function ensureCustomerNotesColumn() {
+  if (customerNotesColumnEnsured) return;
+  try {
+    await prisma.$executeRawUnsafe('ALTER TABLE app_outward_entries ADD COLUMN customer_notes TEXT NULL');
+  } catch (e) {
+    // Column already exists
+  }
+  customerNotesColumnEnsured = true;
+}
+
 export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
@@ -76,7 +87,7 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
           if (cust?.customer_name) {
             orConditions.push({ customer_name: cust.customer_name });
           }
-        } catch (e) {}
+        } catch (e) { }
       } else {
         try {
           const vendor = await prisma.vendor.findFirst({
@@ -86,7 +97,7 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
           if (vendor?.name) {
             orConditions.push({ vendor_name: vendor.name });
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
       where.AND.push({
@@ -112,6 +123,8 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
       where.AND.push({ date: dateFilter });
     }
 
+    await ensureCustomerNotesColumn();
+
     const [entries, totalCount] = await Promise.all([
       prisma.outwardEntry.findMany({
         where,
@@ -125,30 +138,49 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
       }),
       prisma.outwardEntry.count({ where })
     ]);
-    
-    const parsedEntries = entries.map((e: any) => ({
-      ...e,
-      outwardNo: e.outward_no,
-      partyType: e.party_type,
-      customerId: e.customer_id,
-      customerName: e.customer_name,
-      vendorId: e.vendor_id,
-      vendorName: e.vendor_name,
-      processName: e.process_name,
-      coatingName: e.coating_name,
-      purpose: e.purpose,
-      notes: e.notes,
-      invoiceReference: e.invoice_reference,
-      challanNo: e.challan_no,
-      vehicleNo: e.vehicle_no,
-      driverName: e.driver_name,
-      companyId: e.company_id,
-      inwardId: e.inward_id,
-      inwardNo: e.inward_no,
-      createdAt: e.created_at,
-      items: JSON.parse(e.items_json || '[]')
-    }));
-    
+
+    const customerNotesMap = new Map<string, string>();
+    if (entries.length > 0) {
+      try {
+        const placeholders = entries.map(() => '?').join(',');
+        const rows: any[] = await prisma.$queryRawUnsafe(
+          `SELECT id, customer_notes FROM app_outward_entries WHERE id IN (${placeholders})`,
+          ...entries.map((e: any) => String(e.id))
+        );
+        rows.forEach((r: any) => {
+          customerNotesMap.set(String(r.id), r.customer_notes || '');
+        });
+      } catch (e) { }
+    }
+
+    const parsedEntries = entries.map((e: any) => {
+      const resolvedCustomerNotes = e.customer_notes ?? customerNotesMap.get(String(e.id)) ?? '';
+      return {
+        ...e,
+        outwardNo: e.outward_no,
+        partyType: e.party_type,
+        customerId: e.customer_id,
+        customerName: e.customer_name,
+        vendorId: e.vendor_id,
+        vendorName: e.vendor_name,
+        processName: e.process_name,
+        coatingName: e.coating_name,
+        purpose: e.purpose,
+        notes: e.notes,
+        customer_notes: resolvedCustomerNotes,
+        customerNotes: resolvedCustomerNotes,
+        invoiceReference: e.invoice_reference,
+        challanNo: e.challan_no,
+        vehicleNo: e.vehicle_no,
+        driverName: e.driver_name,
+        companyId: e.company_id,
+        inwardId: e.inward_id,
+        inwardNo: e.inward_no,
+        createdAt: e.created_at,
+        items: JSON.parse(e.items_json || '[]')
+      };
+    });
+
     res.json({
       items: parsedEntries,
       pagination: {
@@ -164,7 +196,7 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
 };
 
 export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
-  const { 
+  const {
     outward_no, outwardNo,
     party_type, partyType,
     customer_id, customerId,
@@ -176,7 +208,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
     challan_no, challanNo,
     vehicle_no, vehicleNo,
     driver_name, driverName,
-    notes, status, items, company_id, companyId,
+    notes, customer_notes, customerNotes, status, items, company_id, companyId,
     inward_id, inwardId,
     inward_no, inwardNo,
     coating_name, coatingName,
@@ -184,7 +216,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   } = req.body;
   const user = req.user;
   const finalCompanyId = user?.role === 'super_admin' ? (company_id || companyId) : user?.company_id;
-  
+
   const finalPartyType = party_type || partyType || 'customer';
   const prefix = finalPartyType === 'vendor' ? 'CH-VD-' : 'CH-CU-';
   const finalOutwardNo = outward_no || outwardNo || await generateNextSequence('app_outward_entries', 'outward_no', prefix, finalCompanyId, 2001);
@@ -195,8 +227,10 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
   const finalProcessName = process_name || processName;
   const finalInwardId = inward_id || inwardId;
   const finalInwardNo = inward_no || inwardNo;
+  const finalCustomerNotes = String(customer_notes ?? customerNotes ?? '');
 
   try {
+    await ensureCustomerNotesColumn();
     const entry = await prisma.$transaction(async (tx) => {
       const newEntry = await (tx.outwardEntry as any).create({
         data: {
@@ -224,6 +258,12 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           date: date ? new Date(date) : new Date()
         }
       });
+
+      await tx.$executeRawUnsafe(
+        'UPDATE app_outward_entries SET customer_notes = ? WHERE id = ?',
+        finalCustomerNotes,
+        newEntry.id
+      );
 
       // DUAL-COMPLETION STATUS UPDATE
       if (finalInwardId) {
@@ -255,7 +295,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
               ]
             }
           });
-          
+
           // Optimization: Pre-aggregate billed and dispatched totals to avoid nested loop overhead
           const billedMap = new Map<string, number>();
           const dispatchedMap = new Map<string, number>();
@@ -284,13 +324,13 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           let allDispatched = true;
 
           originalItems.forEach((item: any) => {
-             const iden = (item.description || item.item_name || '').toLowerCase();
-             const itemBilled = billedMap.get(iden) || 0;
-             const itemDispatched = dispatchedMap.get(iden) || 0;
+            const iden = (item.description || item.item_name || '').toLowerCase();
+            const itemBilled = billedMap.get(iden) || 0;
+            const itemDispatched = dispatchedMap.get(iden) || 0;
 
-             const original = parseFloat(item.quantity || item.qty || '0');
-             if (itemBilled < original - 0.5) allBilled = false;
-             if (itemDispatched < original - 0.5) allDispatched = false;
+            const original = parseFloat(item.quantity || item.qty || '0');
+            if (itemBilled < original - 0.5) allBilled = false;
+            if (itemDispatched < original - 0.5) allDispatched = false;
           });
 
           await tx.inwardEntry.update({
@@ -310,6 +350,8 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
 
     res.status(201).json({
       ...entry,
+      customer_notes: finalCustomerNotes,
+      customerNotes: finalCustomerNotes,
       items: JSON.parse((entry as any).items_json || '[]')
     });
   } catch (error: any) {
@@ -319,7 +361,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
 
 export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
-  const { 
+  const {
     outward_no, outwardNo,
     party_type, partyType,
     customer_id, customerId,
@@ -331,7 +373,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
     challan_no, challanNo,
     vehicle_no, vehicleNo,
     driver_name, driverName,
-    notes, status, items,
+    notes, customer_notes, customerNotes, status, items,
     coating_name, coatingName,
     purpose, date
   } = req.body;
@@ -341,8 +383,10 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
   const finalVendorId = vendor_id || vendorId;
   const finalVendorName = vendor_name || vendorName;
   const finalProcessName = process_name || processName;
+  const finalCustomerNotes = customer_notes !== undefined ? customer_notes : customerNotes;
 
   try {
+    await ensureCustomerNotesColumn();
     const entry = await prisma.$transaction(async (tx) => {
       const updatedEntry = await (tx.outwardEntry as any).update({
         where: { id: String(id) },
@@ -367,6 +411,14 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           amount: parseFloat(String(req.body.amount || 0)),
         }
       });
+
+      if (finalCustomerNotes !== undefined) {
+        await tx.$executeRawUnsafe(
+          'UPDATE app_outward_entries SET customer_notes = ? WHERE id = ?',
+          String(finalCustomerNotes || ''),
+          String(id)
+        );
+      }
 
       // DUAL-COMPLETION STATUS UPDATE
       const effInwardId = updatedEntry.inward_id;
@@ -399,7 +451,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
               ]
             }
           });
-          
+
           const billedMap = new Map<string, number>();
           const dispatchedMap = new Map<string, number>();
 
@@ -425,12 +477,12 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           let allDispatched = true;
 
           originalItems.forEach((item: any) => {
-             const iden = (item.description || item.item_name || '').toLowerCase();
-             const itemBilled = billedMap.get(iden) || 0;
-             const itemDispatched = dispatchedMap.get(iden) || 0;
-             const original = parseFloat(item.quantity || item.qty || '0');
-             if (itemBilled < original - 0.5) allBilled = false;
-             if (itemDispatched < original - 0.5) allDispatched = false;
+            const iden = (item.description || item.item_name || '').toLowerCase();
+            const itemBilled = billedMap.get(iden) || 0;
+            const itemDispatched = dispatchedMap.get(iden) || 0;
+            const original = parseFloat(item.quantity || item.qty || '0');
+            if (itemBilled < original - 0.5) allBilled = false;
+            if (itemDispatched < original - 0.5) allDispatched = false;
           });
 
           await tx.inwardEntry.update({
@@ -450,6 +502,8 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
 
     res.json({
       ...entry,
+      customer_notes: finalCustomerNotes !== undefined ? String(finalCustomerNotes || '') : (entry as any).customer_notes,
+      customerNotes: finalCustomerNotes !== undefined ? String(finalCustomerNotes || '') : (entry as any).customer_notes,
       items: JSON.parse((entry as any).items_json || '[]')
     });
   } catch (error: any) {
@@ -470,12 +524,26 @@ export const deleteOutwardEntry = async (req: AuthRequest, res: Response) => {
 export const getOutwardById = async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
   try {
+    await ensureCustomerNotesColumn();
     const entry = await prisma.outwardEntry.findUnique({
       where: { id: String(id) }
     });
 
     if (!entry) {
       return res.status(404).json({ error: 'Outward entry not found' });
+    }
+
+    let resolvedCustomerNotes = (entry as any).customer_notes || '';
+    if (!resolvedCustomerNotes) {
+      try {
+        const rows: any[] = await prisma.$queryRawUnsafe(
+          'SELECT customer_notes FROM app_outward_entries WHERE id = ? LIMIT 1',
+          String(id)
+        );
+        if (rows && rows[0]) {
+          resolvedCustomerNotes = rows[0].customer_notes || '';
+        }
+      } catch (e) { }
     }
 
     let address = '';
@@ -537,6 +605,8 @@ export const getOutwardById = async (req: AuthRequest, res: Response) => {
       coatingName: entry.coating_name,
       purpose: entry.purpose,
       notes: entry.notes,
+      customer_notes: resolvedCustomerNotes,
+      customerNotes: resolvedCustomerNotes,
       address,
       gstin,
       phone,
