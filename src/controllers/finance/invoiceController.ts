@@ -4,6 +4,7 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import { logAudit } from '../../utils/auditLogger';
 import { withRetry } from '../../utils/retry';
 import crypto from 'crypto';
+import { getItemKey, getGenericKey, consumeFromPools } from '../logistics/inwardController';
 
 export const getAllInvoices = async (req: AuthRequest, res: Response) => {
   const user = req.user;
@@ -559,37 +560,69 @@ export const getAllInvoices = async (req: AuthRequest, res: Response) => {
                      }
                  });
                  
-                 const billedByOthers: Record<string, number> = {};
+                 // Group billed by other invoices with process awareness
+                 const billedByOthersSpecific = new Map<string, number>();
+                 const billedByOthersGeneric = new Map<string, number>();
                  otherInvoices.forEach(otherInv => {
                      const otherItems = JSON.parse(otherInv.items_json || '[]');
                      otherItems.forEach((oi: any) => {
-                         const itemName = String(oi.description || oi.item_name || '').toLowerCase().trim();
-                         if (!billedByOthers[itemName]) billedByOthers[itemName] = 0;
-                         billedByOthers[itemName] += (Number(oi.quantity || 0) + Number(oi.wopQty || 0));
+                         const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+                         const p = String(oi.process || '').toLowerCase().trim();
+                         const qty = (Number(oi.quantity || 0) + Number(oi.wopQty || 0));
+                         if (qty <= 0) return;
+                         if (p) {
+                           const k = getItemKey(d, p);
+                           billedByOthersSpecific.set(k, (billedByOthersSpecific.get(k) || 0) + qty);
+                         } else if (d) {
+                           billedByOthersGeneric.set(d, (billedByOthersGeneric.get(d) || 0) + qty);
+                         }
                      });
                  });
 
-                 // Also track this invoice's OWN current quantities per item
-                 const myOwnQty: Record<string, number> = {};
+                 // Pool total inward quantities available
+                 const inwardPoolSpecific = new Map<string, number>();
+                 const inwardPoolGeneric = new Map<string, number>();
+                 inwardItems.forEach((ii: any) => {
+                     const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+                     const p = String(ii.process || '').toLowerCase().trim();
+                     const qty = Number(ii.quantity ?? ii.vendorWorkBalance ?? ii.billingBalance ?? ii.remainingQty ?? 0);
+                     if (qty <= 0) return;
+                     if (p) {
+                       const k = getItemKey(d, p);
+                       inwardPoolSpecific.set(k, (inwardPoolSpecific.get(k) || 0) + qty);
+                     } else if (d) {
+                       inwardPoolGeneric.set(d, (inwardPoolGeneric.get(d) || 0) + qty);
+                     }
+                 });
+
+                 // Track total quantities in THIS invoice
+                 const thisInvSpecific = new Map<string, number>();
+                 const thisInvGeneric = new Map<string, number>();
                  mapped.items.forEach((item: any) => {
-                     const itemName = String(item.description || item.item_name || '').toLowerCase().trim();
-                     myOwnQty[itemName] = (Number(item.quantity || 0) + Number(item.wopQty || 0));
+                     const d = String(item.description || item.item_name || '').toLowerCase().trim();
+                     const p = String(item.process || '').toLowerCase().trim();
+                     const qty = (Number(item.quantity || 0) + Number(item.wopQty || 0));
+                     if (p) {
+                       const k = getItemKey(d, p);
+                       thisInvSpecific.set(k, (thisInvSpecific.get(k) || 0) + qty);
+                     } else if (d) {
+                       thisInvGeneric.set(d, (thisInvGeneric.get(d) || 0) + qty);
+                     }
                  });
                  
                  mapped.items = mapped.items.map((item: any) => {
-                     const itemName = String(item.description || item.item_name || '').toLowerCase().trim();
-                     const originalItem = inwardItems.find((ii: any) => String(ii.description || ii.item_name || '').toLowerCase().trim() === itemName);
+                     const d = String(item.description || item.item_name || '').toLowerCase().trim();
+                     const p = String(item.process || '').toLowerCase().trim();
+                     const k = getItemKey(d, p);
                      
-                     if (originalItem) {
-                         const originalQty = Number(originalItem.quantity ?? originalItem.vendorWorkBalance ?? originalItem.billingBalance ?? originalItem.remainingQty ?? 0);
-                         const alreadyBilledByOthers = billedByOthers[itemName] || 0;
-                         const myCurrentQty = myOwnQty[itemName] || 0;
-                         // maxQty = remaining_pool (inward total - other invoices) 
-                         // The remaining_pool already includes our own qty since we excluded ourselves.
-                         // We explicitly compute: (inward total - others) to get total space available to this invoice.
-                         // This allows the user to increase from their current qty up to this max.
-                         item.maxQty = Math.max(myCurrentQty, originalQty - alreadyBilledByOthers);
-                     }
+                     const totalInward = (p && inwardPoolSpecific.has(k)) ? (inwardPoolSpecific.get(k) || 0) : (inwardPoolGeneric.get(d) || 0);
+                     const billedOthers = (p && billedByOthersSpecific.has(k)) ? (billedByOthersSpecific.get(k) || 0) : (billedByOthersGeneric.get(d) || 0);
+                     const myItemQty = (Number(item.quantity || 0) + Number(item.wopQty || 0));
+                     const totalInThisInv = (p && thisInvSpecific.has(k)) ? (thisInvSpecific.get(k) || 0) : (thisInvGeneric.get(d) || 0);
+                     
+                     const otherRowsInThisInv = Math.max(0, totalInThisInv - myItemQty);
+                     const maxAllowed = Math.max(myItemQty, totalInward - billedOthers - otherRowsInThisInv);
+                     item.maxQty = maxAllowed;
                      return item;
                  });
              }
@@ -830,23 +863,39 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
               }
             });
             
-            const billedMap = new Map<string, number>();
-            const dispatchedMap = new Map<string, number>();
+            const invoicedSpecific = new Map<string, number>();
+            const invoicedGeneric = new Map<string, number>();
+            const dispatchedSpecific = new Map<string, number>();
+            const dispatchedGeneric = new Map<string, number>();
 
             allInvoices.forEach((inv: any) => {
               const invItems = JSON.parse(inv.items_json || '[]');
               invItems.forEach((ii: any) => {
-                const iden = (ii.description || ii.item_name || '').toLowerCase();
-                billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
+                const qty = (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+                if (qty <= 0) return;
+                const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+                const p = String(ii.process || '').toLowerCase().trim();
+                if (p) {
+                  invoicedSpecific.set(getItemKey(d, p), (invoicedSpecific.get(getItemKey(d, p)) || 0) + qty);
+                } else if (d) {
+                  invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
+                }
               });
             });
 
             allOutwards.forEach((ow: any) => {
               const owItems = JSON.parse(ow.items_json || '[]');
               owItems.forEach((oi: any) => {
-                const iden = (oi.description || oi.item_name || '').toLowerCase();
                 if (ow.party_type !== 'vendor') {
-                  dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+                  const qty = parseFloat(oi.quantity || oi.qty || '0');
+                  if (qty <= 0) return;
+                  const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+                  const p = String(oi.process || '').toLowerCase().trim();
+                  if (p) {
+                    dispatchedSpecific.set(getItemKey(d, p), (dispatchedSpecific.get(getItemKey(d, p)) || 0) + qty);
+                  } else if (d) {
+                    dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
+                  }
                 }
               });
             });
@@ -855,12 +904,13 @@ export const createInvoice = async (req: AuthRequest, res: Response) => {
             let allDispatched = true;
 
             originalItems.forEach((item: any) => {
-               const iden = (item.description || item.item_name || '').toLowerCase();
-               const itemBilled = billedMap.get(iden) || 0;
-               const itemDispatched = dispatchedMap.get(iden) || 0;
                const original = parseFloat(item.quantity || item.qty || '0');
-               if (itemBilled < original - 0.5) allBilled = false;
-               if (itemDispatched < original - 0.5) allDispatched = false;
+               const d = String(item.description || item.item_name || '').toLowerCase().trim();
+               const p = String(item.process || '').toLowerCase().trim();
+               const billed = consumeFromPools(invoicedSpecific, invoicedGeneric, original, d, p);
+               const dispatched = consumeFromPools(dispatchedSpecific, dispatchedGeneric, original, d, p);
+               if (billed < original - 0.5) allBilled = false;
+               if (dispatched < original - 0.5) allDispatched = false;
             });
 
             await tx.inwardEntry.update({
@@ -1151,28 +1201,61 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
                 ]
               }
             });
-            const billedByOthersValidation: Record<string, number> = {};
+            const billedByOthersSpecific = new Map<string, number>();
+            const billedByOthersGeneric = new Map<string, number>();
             otherInvsForValidation.forEach((oi: any) => {
               const oiItems = JSON.parse(oi.items_json || '[]');
               oiItems.forEach((oiItem: any) => {
-                const n = String(oiItem.description || oiItem.item_name || '').toLowerCase().trim();
-                billedByOthersValidation[n] = (billedByOthersValidation[n] || 0) + (Number(oiItem.quantity || 0) + Number(oiItem.wopQty || 0));
+                const d = String(oiItem.description || oiItem.item_name || '').toLowerCase().trim();
+                const p = String(oiItem.process || '').toLowerCase().trim();
+                const qty = (Number(oiItem.quantity || 0) + Number(oiItem.wopQty || 0));
+                if (qty <= 0) return;
+                if (p) {
+                  const k = getItemKey(d, p);
+                  billedByOthersSpecific.set(k, (billedByOthersSpecific.get(k) || 0) + qty);
+                } else if (d) {
+                  billedByOthersGeneric.set(d, (billedByOthersGeneric.get(d) || 0) + qty);
+                }
               });
             });
 
+            // Pool total inward quantities available
+            const inwardPoolSpecific = new Map<string, number>();
+            const inwardPoolGeneric = new Map<string, number>();
+            inwardItemsForValidation.forEach((ii: any) => {
+              const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+              const p = String(ii.process || '').toLowerCase().trim();
+              const qty = Number(ii.quantity ?? ii.vendorWorkBalance ?? ii.billingBalance ?? 0);
+              if (qty <= 0) return;
+              if (p) {
+                const k = getItemKey(d, p);
+                inwardPoolSpecific.set(k, (inwardPoolSpecific.get(k) || 0) + qty);
+              } else if (d) {
+                inwardPoolGeneric.set(d, (inwardPoolGeneric.get(d) || 0) + qty);
+              }
+            });
+
+            // Sum up quantities of this invoice by key
+            const thisInvoiceTotals = new Map<string, { qty: number; desc: string; proc: string }>();
             for (const newItem of items) {
-              const itemName = String(newItem.description || newItem.item_name || '').toLowerCase().trim();
-              const originalInwardItem = inwardItemsForValidation.find((ii: any) =>
-                String(ii.description || ii.item_name || '').toLowerCase().trim() === itemName
-              );
-              if (originalInwardItem) {
-                const originalQty = Number(originalInwardItem.quantity ?? originalInwardItem.vendorWorkBalance ?? originalInwardItem.billingBalance ?? 0);
-                const alreadyBilledByOthers = billedByOthersValidation[itemName] || 0;
-                const maxAllowed = originalQty - alreadyBilledByOthers;
-                const newTotal = Number(newItem.quantity || 0) + Number(newItem.wopQty || 0);
-                if (newTotal > maxAllowed + 0.5) {
-                  throw new Error(`Quantity for "${newItem.description || itemName}" (${newTotal}) exceeds the maximum available balance (${maxAllowed}). Please reduce the quantity.`);
-                }
+              const d = String(newItem.description || newItem.item_name || '').toLowerCase().trim();
+              const p = String(newItem.process || '').toLowerCase().trim();
+              const qty = Number(newItem.quantity || 0) + Number(newItem.wopQty || 0);
+              const k = getItemKey(d, p);
+              const existing = thisInvoiceTotals.get(k) || { qty: 0, desc: newItem.description || newItem.item_name || d, proc: newItem.process || p };
+              existing.qty += qty;
+              thisInvoiceTotals.set(k, existing);
+            }
+
+            for (const [key, itemData] of thisInvoiceTotals.entries()) {
+              const d = getGenericKey(itemData.desc);
+              const p = String(itemData.proc || '').toLowerCase().trim();
+              const totalInward = (p && inwardPoolSpecific.has(key)) ? (inwardPoolSpecific.get(key) || 0) : (inwardPoolGeneric.get(d) || 0);
+              const alreadyBilledOthers = (p && billedByOthersSpecific.has(key)) ? (billedByOthersSpecific.get(key) || 0) : (billedByOthersGeneric.get(d) || 0);
+              const maxAllowed = totalInward - alreadyBilledOthers;
+              if (totalInward > 0 && itemData.qty > maxAllowed + 0.5) {
+                const displayName = itemData.proc ? `${itemData.desc} (${itemData.proc})` : itemData.desc;
+                throw new Error(`Total quantity for "${displayName}" (${itemData.qty}) exceeds the maximum available balance (${maxAllowed}). Please reduce the quantity.`);
               }
             }
           }
@@ -1222,23 +1305,39 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
             const allInvoices = await tx.legacyInvoice.findMany({ where: { inward_id: inwardIdStr } });
             const allOutwards = await tx.outwardEntry.findMany({ where: { inward_id: inwardIdStr } });
             
-            const billedMap = new Map<string, number>();
-            const dispatchedMap = new Map<string, number>();
+            const invoicedSpecific = new Map<string, number>();
+            const invoicedGeneric = new Map<string, number>();
+            const dispatchedSpecific = new Map<string, number>();
+            const dispatchedGeneric = new Map<string, number>();
 
             allInvoices.forEach((inv: any) => {
               const invItems = JSON.parse(inv.items_json || '[]');
               invItems.forEach((ii: any) => {
-                const iden = (ii.description || ii.item_name || '').toLowerCase();
-                billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
+                const qty = (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+                if (qty <= 0) return;
+                const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+                const p = String(ii.process || '').toLowerCase().trim();
+                if (p) {
+                  invoicedSpecific.set(getItemKey(d, p), (invoicedSpecific.get(getItemKey(d, p)) || 0) + qty);
+                } else if (d) {
+                  invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
+                }
               });
             });
 
             allOutwards.forEach((ow: any) => {
               const owItems = JSON.parse(ow.items_json || '[]');
               owItems.forEach((oi: any) => {
-                const iden = (oi.description || oi.item_name || '').toLowerCase();
                 if (ow.party_type !== 'vendor') {
-                  dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+                  const qty = parseFloat(oi.quantity || oi.qty || '0');
+                  if (qty <= 0) return;
+                  const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+                  const p = String(oi.process || '').toLowerCase().trim();
+                  if (p) {
+                    dispatchedSpecific.set(getItemKey(d, p), (dispatchedSpecific.get(getItemKey(d, p)) || 0) + qty);
+                  } else if (d) {
+                    dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
+                  }
                 }
               });
             });
@@ -1252,12 +1351,13 @@ export const updateInvoice = async (req: AuthRequest, res: Response) => {
               const originalItems = JSON.parse(entry.items_json || '[]');
 
               originalItems.forEach((item: any) => {
-                 const iden = (item.description || item.item_name || '').toLowerCase();
-                 const itemBilled = billedMap.get(iden) || 0;
-                 const itemDispatched = dispatchedMap.get(iden) || 0;
-                 const original = parseFloat(item.quantity || item.qty || '0');
-                 if (itemBilled < original - 0.5) allBilled = false;
-                 if (itemDispatched < original - 0.5) allDispatched = false;
+                const original = parseFloat(item.quantity || item.qty || '0');
+                const d = String(item.description || item.item_name || '').toLowerCase().trim();
+                const p = String(item.process || '').toLowerCase().trim();
+                const billed = consumeFromPools(invoicedSpecific, invoicedGeneric, original, d, p);
+                const dispatched = consumeFromPools(dispatchedSpecific, dispatchedGeneric, original, d, p);
+                if (billed < original - 0.5) allBilled = false;
+                if (dispatched < original - 0.5) allDispatched = false;
               });
 
               await tx.inwardEntry.update({

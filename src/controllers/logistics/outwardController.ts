@@ -3,6 +3,7 @@ import prisma from '../../config/prisma';
 import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 import { generateNextSequence } from '../../utils/sequenceGenerator';
+import { getItemKey, getGenericKey, consumeFromPools } from './inwardController';
 
 let customerNotesColumnEnsured = false;
 async function ensureCustomerNotesColumn() {
@@ -176,6 +177,9 @@ export const getOutwardEntries = async (req: AuthRequest, res: Response) => {
         companyId: e.company_id,
         inwardId: e.inward_id,
         inwardNo: e.inward_no,
+        amount: e.amount || 0,
+        customerJobValue: e.amount || 0,
+        jobValue: e.amount || 0,
         createdAt: e.created_at,
         items: JSON.parse(e.items_json || '[]')
       };
@@ -253,7 +257,7 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           coating_name: String(coating_name || coatingName || ''),
           purpose: String(purpose || ''),
           status: status || 'completed',
-          amount: parseFloat(String(req.body.amount || '0')),
+          amount: parseFloat(String(req.body.amount || req.body.customerJobValue || req.body.customer_job_value || req.body.jobValue || '0')),
           items_json: JSON.stringify(items || []),
           date: date ? new Date(date) : new Date()
         }
@@ -296,26 +300,39 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
             }
           });
 
-          // Optimization: Pre-aggregate billed and dispatched totals to avoid nested loop overhead
-          const billedMap = new Map<string, number>();
-          const dispatchedMap = new Map<string, number>();
+          const invoicedSpecific = new Map<string, number>();
+          const invoicedGeneric = new Map<string, number>();
+          const dispatchedSpecific = new Map<string, number>();
+          const dispatchedGeneric = new Map<string, number>();
 
           allInvoices.forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
             invItems.forEach((ii: any) => {
-              const iden = (ii.description || ii.item_name || '').toLowerCase();
               const qty = (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
-              billedMap.set(iden, (billedMap.get(iden) || 0) + qty);
+              if (qty <= 0) return;
+              const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+              const p = String(ii.process || '').toLowerCase().trim();
+              if (p) {
+                invoicedSpecific.set(getItemKey(d, p), (invoicedSpecific.get(getItemKey(d, p)) || 0) + qty);
+              } else if (d) {
+                invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
+              }
             });
           });
 
           allOutwards.forEach((ow: any) => {
             const owItems = JSON.parse(ow.items_json || '[]');
             owItems.forEach((oi: any) => {
-              const iden = (oi.description || oi.item_name || '').toLowerCase();
               if (ow.party_type !== 'vendor') {
                 const qty = parseFloat(oi.quantity || oi.qty || '0');
-                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + qty);
+                if (qty <= 0) return;
+                const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+                const p = String(oi.process || '').toLowerCase().trim();
+                if (p) {
+                  dispatchedSpecific.set(getItemKey(d, p), (dispatchedSpecific.get(getItemKey(d, p)) || 0) + qty);
+                } else if (d) {
+                  dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
+                }
               }
             });
           });
@@ -324,13 +341,13 @@ export const createOutwardEntry = async (req: AuthRequest, res: Response) => {
           let allDispatched = true;
 
           originalItems.forEach((item: any) => {
-            const iden = (item.description || item.item_name || '').toLowerCase();
-            const itemBilled = billedMap.get(iden) || 0;
-            const itemDispatched = dispatchedMap.get(iden) || 0;
-
             const original = parseFloat(item.quantity || item.qty || '0');
-            if (itemBilled < original - 0.5) allBilled = false;
-            if (itemDispatched < original - 0.5) allDispatched = false;
+            const d = String(item.description || item.item_name || '').toLowerCase().trim();
+            const p = String(item.process || '').toLowerCase().trim();
+            const billed = consumeFromPools(invoicedSpecific, invoicedGeneric, original, d, p);
+            const dispatched = consumeFromPools(dispatchedSpecific, dispatchedGeneric, original, d, p);
+            if (billed < original - 0.5) allBilled = false;
+            if (dispatched < original - 0.5) allDispatched = false;
           });
 
           await tx.inwardEntry.update({
@@ -408,7 +425,7 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           purpose,
           date: date ? new Date(date) : undefined,
           items_json: items ? JSON.stringify(items) : undefined,
-          amount: parseFloat(String(req.body.amount || 0)),
+          amount: parseFloat(String(req.body.amount || req.body.customerJobValue || req.body.customer_job_value || req.body.jobValue || 0)),
         }
       });
 
@@ -452,23 +469,39 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
             }
           });
 
-          const billedMap = new Map<string, number>();
-          const dispatchedMap = new Map<string, number>();
+          const invoicedSpecific = new Map<string, number>();
+          const invoicedGeneric = new Map<string, number>();
+          const dispatchedSpecific = new Map<string, number>();
+          const dispatchedGeneric = new Map<string, number>();
 
           allInvoices.forEach((inv: any) => {
             const invItems = JSON.parse(inv.items_json || '[]');
             invItems.forEach((ii: any) => {
-              const iden = (ii.description || ii.item_name || '').toLowerCase();
-              billedMap.set(iden, (billedMap.get(iden) || 0) + (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0')));
+              const qty = (parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0'));
+              if (qty <= 0) return;
+              const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+              const p = String(ii.process || '').toLowerCase().trim();
+              if (p) {
+                invoicedSpecific.set(getItemKey(d, p), (invoicedSpecific.get(getItemKey(d, p)) || 0) + qty);
+              } else if (d) {
+                invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
+              }
             });
           });
 
           allOutwards.forEach((ow: any) => {
             const owItems = JSON.parse(ow.items_json || '[]');
             owItems.forEach((oi: any) => {
-              const iden = (oi.description || oi.item_name || '').toLowerCase();
               if (ow.party_type !== 'vendor') {
-                dispatchedMap.set(iden, (dispatchedMap.get(iden) || 0) + parseFloat(oi.quantity || oi.qty || '0'));
+                const qty = parseFloat(oi.quantity || oi.qty || '0');
+                if (qty <= 0) return;
+                const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+                const p = String(oi.process || '').toLowerCase().trim();
+                if (p) {
+                  dispatchedSpecific.set(getItemKey(d, p), (dispatchedSpecific.get(getItemKey(d, p)) || 0) + qty);
+                } else if (d) {
+                  dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
+                }
               }
             });
           });
@@ -477,12 +510,13 @@ export const updateOutwardEntry = async (req: AuthRequest, res: Response) => {
           let allDispatched = true;
 
           originalItems.forEach((item: any) => {
-            const iden = (item.description || item.item_name || '').toLowerCase();
-            const itemBilled = billedMap.get(iden) || 0;
-            const itemDispatched = dispatchedMap.get(iden) || 0;
             const original = parseFloat(item.quantity || item.qty || '0');
-            if (itemBilled < original - 0.5) allBilled = false;
-            if (itemDispatched < original - 0.5) allDispatched = false;
+            const d = String(item.description || item.item_name || '').toLowerCase().trim();
+            const p = String(item.process || '').toLowerCase().trim();
+            const billed = consumeFromPools(invoicedSpecific, invoicedGeneric, original, d, p);
+            const dispatched = consumeFromPools(dispatchedSpecific, dispatchedGeneric, original, d, p);
+            if (billed < original - 0.5) allBilled = false;
+            if (dispatched < original - 0.5) allDispatched = false;
           });
 
           await tx.inwardEntry.update({
@@ -618,6 +652,9 @@ export const getOutwardById = async (req: AuthRequest, res: Response) => {
       companyId: entry.company_id,
       inwardId: entry.inward_id,
       inwardNo: entry.inward_no,
+      amount: entry.amount || 0,
+      customerJobValue: entry.amount || 0,
+      jobValue: entry.amount || 0,
       createdAt: entry.created_at,
       items: JSON.parse(entry.items_json || '[]')
     });

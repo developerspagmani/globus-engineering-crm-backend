@@ -4,6 +4,56 @@ import { AuthRequest } from '../../middleware/authMiddleware';
 import crypto from 'crypto';
 import { generateNextSequence } from '../../utils/sequenceGenerator';
 
+export const getItemKey = (desc: any, proc: any) => {
+  const d = String(desc || '').toLowerCase().trim();
+  const p = String(proc || '').toLowerCase().trim();
+  return `${d}::${p}`;
+};
+
+export const getGenericKey = (desc: any) => String(desc || '').toLowerCase().trim();
+
+export const consumeFromPools = (
+  specificPool: Map<string, number>,
+  genericPool: Map<string, number>,
+  max: number,
+  desc: string,
+  proc: string
+) => {
+  const key = getItemKey(desc, proc);
+  const gKey = getGenericKey(desc);
+  let consumed = 0;
+
+  // 1. Try specific match (item + process)
+  if (proc && specificPool.has(key)) {
+    const avail = specificPool.get(key) || 0;
+    const take = Math.min(avail, max - consumed);
+    consumed += take;
+    specificPool.set(key, avail - take);
+  }
+
+  // 2. Try generic match (fallback for items billed without process or inwards with no process)
+  if (consumed < max && genericPool.has(gKey)) {
+    const avail = genericPool.get(gKey) || 0;
+    const take = Math.min(avail, max - consumed);
+    consumed += take;
+    genericPool.set(gKey, avail - take);
+  }
+
+  // 3. Fallback: if inward item has no process specified, check any specific pool matching item name
+  if (consumed < max && !proc) {
+    for (const [sKey, avail] of specificPool.entries()) {
+      if (sKey.startsWith(`${gKey}::`) && avail > 0) {
+        const take = Math.min(avail, max - consumed);
+        consumed += take;
+        specificPool.set(sKey, avail - take);
+        if (consumed >= max) break;
+      }
+    }
+  }
+
+  return consumed;
+};
+
 export const getInwardEntries = async (req: AuthRequest, res: Response) => {
   const queryCompanyId = (req.query.companyId || req.query.company_id) as string;
   const user = req.user;
@@ -227,23 +277,28 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       });
       const outwardsForThisEntry = outwardGroups.get(String(e.id)) || [];
 
-      // 1. Pre-aggregate quantities by item identifier
-      const invoicedTotals = new Map<string, number>();
-      const dispatchedTotals = new Map<string, number>();
-      const sentToVendorTotals = new Map<string, number>();
-      const returnedFromVendorTotals = new Map<string, number>();
+      // 1. Pre-aggregate quantities by item identifier with process awareness
+      const invoicedSpecific = new Map<string, number>();
+      const invoicedGeneric = new Map<string, number>();
+      const dispatchedSpecific = new Map<string, number>();
+      const dispatchedGeneric = new Map<string, number>();
+      const sentToVendorSpecific = new Map<string, number>();
+      const sentToVendorGeneric = new Map<string, number>();
+      const returnedFromVendorSpecific = new Map<string, number>();
+      const returnedFromVendorGeneric = new Map<string, number>();
 
       invoicedForThisEntry.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
-        invItems.forEach((ii: any, iIdx: number) => {
+        invItems.forEach((ii: any) => {
           const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
-          const cleanName = String(ii.description || ii.item_name || '').toLowerCase().trim();
-          if (cleanName) {
-            invoicedTotals.set(cleanName, (invoicedTotals.get(cleanName) || 0) + qty);
-          }
-          if (ii.id !== undefined && ii.id !== null && ii.id !== '') {
-            const strId = String(ii.id);
-            invoicedTotals.set(strId, (invoicedTotals.get(strId) || 0) + qty);
+          if (qty <= 0) return;
+          const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+          const p = String(ii.process || '').toLowerCase().trim();
+          if (p) {
+            const key = getItemKey(d, p);
+            invoicedSpecific.set(key, (invoicedSpecific.get(key) || 0) + qty);
+          } else if (d) {
+            invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
           }
         });
       });
@@ -252,16 +307,22 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
         const owItems = JSON.parse(ow.items_json || '[]');
         owItems.forEach((oi: any) => {
           const qty = parseFloat(oi.quantity || oi.qty || '0');
-          const cleanName = String(oi.description || oi.item_name || '').toLowerCase().trim();
+          if (qty <= 0) return;
+          const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+          const p = String(oi.process || '').toLowerCase().trim();
           if (ow.party_type === 'vendor') {
-            if (cleanName) sentToVendorTotals.set(cleanName, (sentToVendorTotals.get(cleanName) || 0) + qty);
-            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
-              sentToVendorTotals.set(String(oi.id), (sentToVendorTotals.get(String(oi.id)) || 0) + qty);
+            if (p) {
+              const key = getItemKey(d, p);
+              sentToVendorSpecific.set(key, (sentToVendorSpecific.get(key) || 0) + qty);
+            } else if (d) {
+              sentToVendorGeneric.set(d, (sentToVendorGeneric.get(d) || 0) + qty);
             }
           } else {
-            if (cleanName) dispatchedTotals.set(cleanName, (dispatchedTotals.get(cleanName) || 0) + qty);
-            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
-              dispatchedTotals.set(String(oi.id), (dispatchedTotals.get(String(oi.id)) || 0) + qty);
+            if (p) {
+              const key = getItemKey(d, p);
+              dispatchedSpecific.set(key, (dispatchedSpecific.get(key) || 0) + qty);
+            } else if (d) {
+              dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
             }
           }
         });
@@ -274,55 +335,28 @@ export const getInwardEntries = async (req: AuthRequest, res: Response) => {
       relatedVendorInwards.forEach((vi: any) => {
         const viItems = JSON.parse(vi.items_json || '[]');
         viItems.forEach((vii: any) => {
-          const cleanName = String(vii.description || vii.item_name || '').toLowerCase().trim();
           const qty = parseFloat(vii.quantity || vii.qty || '0');
-          if (cleanName) returnedFromVendorTotals.set(cleanName, (returnedFromVendorTotals.get(cleanName) || 0) + qty);
-          if (vii.id !== undefined && vii.id !== null && vii.id !== '') {
-            returnedFromVendorTotals.set(String(vii.id), (returnedFromVendorTotals.get(String(vii.id)) || 0) + qty);
+          if (qty <= 0) return;
+          const d = String(vii.description || vii.item_name || '').toLowerCase().trim();
+          const p = String(vii.process || '').toLowerCase().trim();
+          if (p) {
+            const key = getItemKey(d, p);
+            returnedFromVendorSpecific.set(key, (returnedFromVendorSpecific.get(key) || 0) + qty);
+          } else if (d) {
+            returnedFromVendorGeneric.set(d, (returnedFromVendorGeneric.get(d) || 0) + qty);
           }
         });
       });
 
-      const itemCounts = new Map<string, number>();
-      items.forEach((item: any) => {
-        const id = String(item.description || item.item_name || '').toLowerCase().trim();
-        itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
-      });
-
-      const balanceItems = items.map((item: any, idx: number) => {
-        const itemIdentifier = String(item.description || item.item_name || '').toLowerCase().trim();
+      const balanceItems = items.map((item: any) => {
+        const d = String(item.description || item.item_name || '').toLowerCase().trim();
+        const p = String(item.process || '').toLowerCase().trim();
         const originalQty = parseFloat(item.quantity || item.qty || '0');
 
-        const currentCount = itemCounts.get(itemIdentifier) || 0;
-        itemCounts.set(itemIdentifier, currentCount - 1);
-        const isLast = currentCount === 1;
-
-        const consume = (pool: Map<string, number>, max: number) => {
-          let availableByName = itemIdentifier ? (pool.get(itemIdentifier) || 0) : 0;
-          let availableById = (!itemIdentifier || availableByName === 0) ? (pool.get(String(idx)) || 0) : 0;
-          
-          let totalAvailable = availableByName > 0 ? availableByName : availableById;
-          const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
-          
-          let toDeduct = consumed;
-          if (availableByName > 0) {
-            const deduct = Math.min(availableByName, toDeduct);
-            pool.set(itemIdentifier, availableByName - deduct);
-            toDeduct -= deduct;
-          }
-          if (toDeduct > 0 && availableById > 0) {
-            const deduct = Math.min(availableById, toDeduct);
-            pool.set(String(idx), availableById - deduct);
-            toDeduct -= deduct;
-          }
-          
-          return consumed;
-        };
-
-        const totalInvoiced = consume(invoicedTotals, originalQty);
-        const totalDispatched = consume(dispatchedTotals, originalQty);
-        const totalSentToVendor = consume(sentToVendorTotals, originalQty);
-        const totalReturnedFromVendor = consume(returnedFromVendorTotals, originalQty);
+        const totalInvoiced = consumeFromPools(invoicedSpecific, invoicedGeneric, originalQty, d, p);
+        const totalDispatched = consumeFromPools(dispatchedSpecific, dispatchedGeneric, originalQty, d, p);
+        const totalSentToVendor = consumeFromPools(sentToVendorSpecific, sentToVendorGeneric, originalQty, d, p);
+        const totalReturnedFromVendor = consumeFromPools(returnedFromVendorSpecific, returnedFromVendorGeneric, originalQty, d, p);
 
         const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
         
@@ -622,22 +656,27 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       });
       const outwardsForThisEntry = outwardGroups.get(String(entry.id)) || [];
 
-      const invoicedTotals = new Map<string, number>();
-      const dispatchedTotals = new Map<string, number>();
-      const sentToVendorTotals = new Map<string, number>();
-      const returnedFromVendorTotals = new Map<string, number>();
+      const invoicedSpecific = new Map<string, number>();
+      const invoicedGeneric = new Map<string, number>();
+      const dispatchedSpecific = new Map<string, number>();
+      const dispatchedGeneric = new Map<string, number>();
+      const sentToVendorSpecific = new Map<string, number>();
+      const sentToVendorGeneric = new Map<string, number>();
+      const returnedFromVendorSpecific = new Map<string, number>();
+      const returnedFromVendorGeneric = new Map<string, number>();
 
       invoicedForThisEntry.forEach((inv: any) => {
         const invItems = JSON.parse(inv.items_json || '[]');
-        invItems.forEach((ii: any, iIdx: number) => {
+        invItems.forEach((ii: any) => {
           const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
-          const cleanName = String(ii.description || ii.item_name || '').toLowerCase().trim();
-          if (cleanName) {
-            invoicedTotals.set(cleanName, (invoicedTotals.get(cleanName) || 0) + qty);
-          }
-          if (ii.id !== undefined && ii.id !== null && ii.id !== '') {
-            const strId = String(ii.id);
-            invoicedTotals.set(strId, (invoicedTotals.get(strId) || 0) + qty);
+          if (qty <= 0) return;
+          const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+          const p = String(ii.process || '').toLowerCase().trim();
+          if (p) {
+            const key = getItemKey(d, p);
+            invoicedSpecific.set(key, (invoicedSpecific.get(key) || 0) + qty);
+          } else if (d) {
+            invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
           }
         });
       });
@@ -646,16 +685,22 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
         const owItems = JSON.parse(ow.items_json || '[]');
         owItems.forEach((oi: any) => {
           const qty = parseFloat(oi.quantity || oi.qty || '0');
-          const cleanName = String(oi.description || oi.item_name || '').toLowerCase().trim();
+          if (qty <= 0) return;
+          const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+          const p = String(oi.process || '').toLowerCase().trim();
           if (ow.party_type === 'vendor') {
-            if (cleanName) sentToVendorTotals.set(cleanName, (sentToVendorTotals.get(cleanName) || 0) + qty);
-            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
-              sentToVendorTotals.set(String(oi.id), (sentToVendorTotals.get(String(oi.id)) || 0) + qty);
+            if (p) {
+              const key = getItemKey(d, p);
+              sentToVendorSpecific.set(key, (sentToVendorSpecific.get(key) || 0) + qty);
+            } else if (d) {
+              sentToVendorGeneric.set(d, (sentToVendorGeneric.get(d) || 0) + qty);
             }
           } else {
-            if (cleanName) dispatchedTotals.set(cleanName, (dispatchedTotals.get(cleanName) || 0) + qty);
-            if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
-              dispatchedTotals.set(String(oi.id), (dispatchedTotals.get(String(oi.id)) || 0) + qty);
+            if (p) {
+              const key = getItemKey(d, p);
+              dispatchedSpecific.set(key, (dispatchedSpecific.get(key) || 0) + qty);
+            } else if (d) {
+              dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
             }
           }
         });
@@ -668,55 +713,28 @@ export const getPendingInwardsByCustomer = async (req: AuthRequest, res: Respons
       vendorInwardsForThisCustomer.forEach((vi: any) => {
         const viItems = JSON.parse(vi.items_json || '[]');
         viItems.forEach((vii: any) => {
-          const cleanName = String(vii.description || vii.item_name || '').toLowerCase().trim();
           const qty = parseFloat(vii.quantity || vii.qty || '0');
-          if (cleanName) returnedFromVendorTotals.set(cleanName, (returnedFromVendorTotals.get(cleanName) || 0) + qty);
-          if (vii.id !== undefined && vii.id !== null && vii.id !== '') {
-            returnedFromVendorTotals.set(String(vii.id), (returnedFromVendorTotals.get(String(vii.id)) || 0) + qty);
+          if (qty <= 0) return;
+          const d = String(vii.description || vii.item_name || '').toLowerCase().trim();
+          const p = String(vii.process || '').toLowerCase().trim();
+          if (p) {
+            const key = getItemKey(d, p);
+            returnedFromVendorSpecific.set(key, (returnedFromVendorSpecific.get(key) || 0) + qty);
+          } else if (d) {
+            returnedFromVendorGeneric.set(d, (returnedFromVendorGeneric.get(d) || 0) + qty);
           }
         });
       });
 
-      const itemCounts = new Map<string, number>();
-      originalItems.forEach((item: any) => {
-        const id = String(item.description || item.item_name || '').toLowerCase().trim();
-        itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
-      });
-
-      const balanceItems = originalItems.map((item: any, idx: number) => {
-        const itemIdentifier = String(item.description || item.item_name || '').toLowerCase().trim();
+      const balanceItems = originalItems.map((item: any) => {
+        const d = String(item.description || item.item_name || '').toLowerCase().trim();
+        const p = String(item.process || '').toLowerCase().trim();
         const original = parseFloat(item.quantity || item.qty || '0');
 
-        const currentCount = itemCounts.get(itemIdentifier) || 0;
-        itemCounts.set(itemIdentifier, currentCount - 1);
-        const isLast = currentCount === 1;
-
-        const consume = (pool: Map<string, number>, max: number) => {
-          let availableByName = itemIdentifier ? (pool.get(itemIdentifier) || 0) : 0;
-          let availableById = (!itemIdentifier || availableByName === 0) ? (pool.get(String(idx)) || 0) : 0;
-          
-          let totalAvailable = availableByName > 0 ? availableByName : availableById;
-          const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
-          
-          let toDeduct = consumed;
-          if (availableByName > 0) {
-            const deduct = Math.min(availableByName, toDeduct);
-            pool.set(itemIdentifier, availableByName - deduct);
-            toDeduct -= deduct;
-          }
-          if (toDeduct > 0 && availableById > 0) {
-            const deduct = Math.min(availableById, toDeduct);
-            pool.set(String(idx), availableById - deduct);
-            toDeduct -= deduct;
-          }
-          
-          return consumed;
-        };
-
-        const totalInvoicedQty = consume(invoicedTotals, original);
-        const totalDispatchedQty = consume(dispatchedTotals, original);
-        const totalSentToVendorQty = consume(sentToVendorTotals, original);
-        const totalReturnedFromVendorQty = consume(returnedFromVendorTotals, original);
+        const totalInvoicedQty = consumeFromPools(invoicedSpecific, invoicedGeneric, original, d, p);
+        const totalDispatchedQty = consumeFromPools(dispatchedSpecific, dispatchedGeneric, original, d, p);
+        const totalSentToVendorQty = consumeFromPools(sentToVendorSpecific, sentToVendorGeneric, original, d, p);
+        const totalReturnedFromVendorQty = consumeFromPools(returnedFromVendorSpecific, returnedFromVendorGeneric, original, d, p);
 
         const currentlyAtVendor = Math.max(0, totalSentToVendorQty - totalReturnedFromVendorQty);
         
@@ -852,10 +870,14 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       })
     ]);
 
-    const invoicedTotals = new Map<string, number>();
-    const dispatchedTotals = new Map<string, number>();
-    const sentToVendorTotals = new Map<string, number>();
-    const returnedFromVendorTotals = new Map<string, number>();
+    const invoicedSpecific = new Map<string, number>();
+    const invoicedGeneric = new Map<string, number>();
+    const dispatchedSpecific = new Map<string, number>();
+    const dispatchedGeneric = new Map<string, number>();
+    const sentToVendorSpecific = new Map<string, number>();
+    const sentToVendorGeneric = new Map<string, number>();
+    const returnedFromVendorSpecific = new Map<string, number>();
+    const returnedFromVendorGeneric = new Map<string, number>();
 
     invoices.forEach((inv: any) => {
       let matchesThisEntry = false;
@@ -880,13 +902,14 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       const invItems = JSON.parse(inv.items_json || '[]');
       invItems.forEach((ii: any) => {
         const qty = parseFloat(ii.qty || ii.quantity || '0') + parseFloat(ii.wopQty || ii.wop_qty || '0');
-        const cleanName = String(ii.description || ii.item_name || '').toLowerCase().trim();
-        if (cleanName) {
-          invoicedTotals.set(cleanName, (invoicedTotals.get(cleanName) || 0) + qty);
-        }
-        if (ii.id !== undefined && ii.id !== null && ii.id !== '') {
-          const strId = String(ii.id);
-          invoicedTotals.set(strId, (invoicedTotals.get(strId) || 0) + qty);
+        if (qty <= 0) return;
+        const d = String(ii.description || ii.item_name || '').toLowerCase().trim();
+        const p = String(ii.process || '').toLowerCase().trim();
+        if (p) {
+          const key = getItemKey(d, p);
+          invoicedSpecific.set(key, (invoicedSpecific.get(key) || 0) + qty);
+        } else if (d) {
+          invoicedGeneric.set(d, (invoicedGeneric.get(d) || 0) + qty);
         }
       });
     });
@@ -895,16 +918,22 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
       const owItems = JSON.parse(ow.items_json || '[]');
       owItems.forEach((oi: any) => {
         const qty = parseFloat(oi.quantity || oi.qty || '0');
-        const cleanName = String(oi.description || oi.item_name || '').toLowerCase().trim();
+        if (qty <= 0) return;
+        const d = String(oi.description || oi.item_name || '').toLowerCase().trim();
+        const p = String(oi.process || '').toLowerCase().trim();
         if (ow.party_type === 'vendor') {
-          if (cleanName) sentToVendorTotals.set(cleanName, (sentToVendorTotals.get(cleanName) || 0) + qty);
-          if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
-            sentToVendorTotals.set(String(oi.id), (sentToVendorTotals.get(String(oi.id)) || 0) + qty);
+          if (p) {
+            const key = getItemKey(d, p);
+            sentToVendorSpecific.set(key, (sentToVendorSpecific.get(key) || 0) + qty);
+          } else if (d) {
+            sentToVendorGeneric.set(d, (sentToVendorGeneric.get(d) || 0) + qty);
           }
         } else {
-          if (cleanName) dispatchedTotals.set(cleanName, (dispatchedTotals.get(cleanName) || 0) + qty);
-          if (oi.id !== undefined && oi.id !== null && oi.id !== '') {
-            dispatchedTotals.set(String(oi.id), (dispatchedTotals.get(String(oi.id)) || 0) + qty);
+          if (p) {
+            const key = getItemKey(d, p);
+            dispatchedSpecific.set(key, (dispatchedSpecific.get(key) || 0) + qty);
+          } else if (d) {
+            dispatchedGeneric.set(d, (dispatchedGeneric.get(d) || 0) + qty);
           }
         }
       });
@@ -917,55 +946,28 @@ export const getInwardById = async (req: AuthRequest, res: Response) => {
     relatedVendorInwards.forEach((vi: any) => {
       const viItems = JSON.parse(vi.items_json || '[]');
       viItems.forEach((vii: any) => {
-        const cleanName = String(vii.description || vii.item_name || '').toLowerCase().trim();
         const qty = parseFloat(vii.quantity || vii.qty || '0');
-        if (cleanName) returnedFromVendorTotals.set(cleanName, (returnedFromVendorTotals.get(cleanName) || 0) + qty);
-        if (vii.id !== undefined && vii.id !== null && vii.id !== '') {
-          returnedFromVendorTotals.set(String(vii.id), (returnedFromVendorTotals.get(String(vii.id)) || 0) + qty);
+        if (qty <= 0) return;
+        const d = String(vii.description || vii.item_name || '').toLowerCase().trim();
+        const p = String(vii.process || '').toLowerCase().trim();
+        if (p) {
+          const key = getItemKey(d, p);
+          returnedFromVendorSpecific.set(key, (returnedFromVendorSpecific.get(key) || 0) + qty);
+        } else if (d) {
+          returnedFromVendorGeneric.set(d, (returnedFromVendorGeneric.get(d) || 0) + qty);
         }
       });
     });
 
-    const itemCounts = new Map<string, number>();
-    items.forEach((item: any) => {
-      const id = String(item.description || item.item_name || '').toLowerCase().trim();
-      itemCounts.set(id, (itemCounts.get(id) || 0) + 1);
-    });
-
-    const balanceItems = items.map((item: any, idx: number) => {
-      const itemIdentifier = String(item.description || item.item_name || '').toLowerCase().trim();
+    const balanceItems = items.map((item: any) => {
+      const d = String(item.description || item.item_name || '').toLowerCase().trim();
+      const p = String(item.process || '').toLowerCase().trim();
       const originalQty = parseFloat(item.quantity || item.qty || '0');
 
-      const currentCount = itemCounts.get(itemIdentifier) || 0;
-      itemCounts.set(itemIdentifier, currentCount - 1);
-      const isLast = currentCount === 1;
-
-      const consume = (pool: Map<string, number>, max: number) => {
-        let availableByName = itemIdentifier ? (pool.get(itemIdentifier) || 0) : 0;
-        let availableById = (!itemIdentifier || availableByName === 0) ? (pool.get(String(idx)) || 0) : 0;
-        
-        let totalAvailable = availableByName > 0 ? availableByName : availableById;
-        const consumed = isLast ? totalAvailable : Math.min(totalAvailable, max);
-        
-        let toDeduct = consumed;
-        if (availableByName > 0) {
-          const deduct = Math.min(availableByName, toDeduct);
-          pool.set(itemIdentifier, availableByName - deduct);
-          toDeduct -= deduct;
-        }
-        if (toDeduct > 0 && availableById > 0) {
-          const deduct = Math.min(availableById, toDeduct);
-          pool.set(String(idx), availableById - deduct);
-          toDeduct -= deduct;
-        }
-        
-        return consumed;
-      };
-
-      const totalInvoiced = consume(invoicedTotals, originalQty);
-      const totalDispatched = consume(dispatchedTotals, originalQty);
-      const totalSentToVendor = consume(sentToVendorTotals, originalQty);
-      const totalReturnedFromVendor = consume(returnedFromVendorTotals, originalQty);
+      const totalInvoiced = consumeFromPools(invoicedSpecific, invoicedGeneric, originalQty, d, p);
+      const totalDispatched = consumeFromPools(dispatchedSpecific, dispatchedGeneric, originalQty, d, p);
+      const totalSentToVendor = consumeFromPools(sentToVendorSpecific, sentToVendorGeneric, originalQty, d, p);
+      const totalReturnedFromVendor = consumeFromPools(returnedFromVendorSpecific, returnedFromVendorGeneric, originalQty, d, p);
 
       const currentlyAtVendor = Math.max(0, totalSentToVendor - totalReturnedFromVendor);
 
